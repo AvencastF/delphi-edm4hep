@@ -346,6 +346,7 @@ void on_user99() noexcept {
     // in VECP_LVLOCK, not removed.
     meta.putParameter("skelana_IFLCUT", sk::IFLCUT);
     meta.putParameter("skelana_IFLSTR", sk::IFLSTR);
+    if (g_cfg.on_metadata) g_cfg.on_metadata(meta);
     g_writer->writeFrame(meta, "metadata");
   });
 

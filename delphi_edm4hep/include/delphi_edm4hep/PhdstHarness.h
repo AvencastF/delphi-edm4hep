@@ -67,6 +67,7 @@ struct Config {
   InitHook     on_init;
   EventHook    on_event;
   FinalizeHook on_finalize;
+  std::function<void(podio::Frame&)> on_metadata;
 };
 
 // Run the PHDST event loop with `cfg`. Writes a PDLINPUT in cwd per

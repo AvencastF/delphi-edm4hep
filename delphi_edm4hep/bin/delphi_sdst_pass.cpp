@@ -13,6 +13,8 @@
 #include "delphi_edm4hep/Calorimeter/Calorimeter.h"
 #include "delphi_edm4hep/Tracking/EltrSdst.h"
 #include "delphi_edm4hep/Event/Event.h"
+#include "delphi_edm4hep/Event/ProductionWeights.h"
+#include <memory>
 #include "delphi_edm4hep/Pid/ParticleId.h"
 #include "delphi_edm4hep/Pid/PidExtrasSdst.h"
 #include "delphi_edm4hep/Pid/SdstPaExtras.h"
@@ -54,6 +56,7 @@ extern "C" {
 
 static void usage(const char* argv0) {
   std::cerr
+    << "Optional production weights: --mc-weights FILE (prepared by scripts/production/prepare_weights.py)\n"
     << "usage: " << argv0
     << " <input.sdst> <output.edm4hep.root> [-n MAX_EVENTS]\n"
     << "       " << argv0
@@ -83,6 +86,7 @@ int main(int argc, char** argv) {
   harness::Config cfg;
   std::vector<std::string> positional;
   bool have_input_mode = false;
+  std::string weights_path;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -106,6 +110,8 @@ int main(int argc, char** argv) {
       cfg.input_mode  = harness::InputMode::Pdl;
       cfg.input       = argv[++i];
       have_input_mode = true;
+    } else if (arg == "--mc-weights" && i + 1 < argc && weights_path.empty()) {
+      weights_path = argv[++i];
     } else if (arg == "-n" && i + 1 < argc) {
       cfg.max_events = parseMaxEvents(argv[++i], argv[0]);
     } else if (!arg.empty() && arg[0] == '-') {
@@ -131,7 +137,14 @@ int main(int argc, char** argv) {
   // V0 / PhotonConv depend on), then the RecoToGen link emission, then
   // Vertex. Writers run under Pass::Sdst; the prefix on each
   // collection follows its bank.
-  cfg.on_event = [](podio::Frame& frame, int /*run*/, int /*evt*/) {
+  std::shared_ptr<dom::ProductionWeights> weights;
+  if (!weights_path.empty()) {
+    try { weights = std::make_shared<dom::ProductionWeights>(weights_path); }
+    catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
+    cfg.on_metadata = [weights](podio::Frame& frame) { weights->metadata(frame); };
+  }
+  cfg.on_event = [weights](podio::Frame& frame, int run, int evt) {
+    if (weights) weights->event(frame, run, evt);
     delphi_edm4hep::EventContext ctx;
 
     // All writers (CollectionWriter base + ctx-mediated I/O).

@@ -1,5 +1,19 @@
 # LongDST production conversion boundary
 
+For already reconstructed collision longDST, use the same wrapper inside the
+configured container:
+
+```bash
+bash /edm/scripts/production/convert.sh --data /build/converter/delphi_sdst_pass INPUT.al OUTPUT.root -n 100
+```
+
+Omit `-n 100` to convert the whole file. Run in a separate scratch working
+directory per file. Data mode refuses an existing output, skips MC weights and
+the FADGEN audit, and retains the collection-alignment audit. No rebuild or
+second pass is needed. Failed output is partial; do not use it. Good-run selection
+and luminosity matching remain analysis steps. Check wrapper routing locally with
+`python3 scripts/production/tests/check_convert.py`.
+
 `convert.sh BINARY INPUT.ldst OUTPUT.root AUDIT_DIRECTORY` runs inside the pinned
 DELPHI OCI image. Its working directory must contain `my_events.fadgen` from the
 same generation task, plus `task.json`, `generation.json`, and `event-weights.csv`.

@@ -23,7 +23,8 @@ with tempfile.TemporaryDirectory() as tmp:
     def run(args, code=0, **extra):
         calls.write_text('')
         result = subprocess.run(['bash', str(wrapper), *args], cwd=work,
-                                env=dict(env, **extra), capture_output=True, text=True)
+                                env=dict(env, **extra), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, universal_newlines=True)
         assert result.returncode == code, result.stderr
         return [json.loads(line) for line in calls.read_text().splitlines()]
 

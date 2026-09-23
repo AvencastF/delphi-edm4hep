@@ -22,4 +22,6 @@ these operational scripts. Do not claim an empty collection is necessarily a
 converter failure. Detector mappings are unchanged; the converter now supports
 an optional production-weight input and metadata hook.
 
-New wrapper status: locally syntax-checked; compute smoke test pending approval.
+Wrapper and weight output passed the 2026-09-23 all-process NERSC test:
+8,000 converted events and 80 independently checked ROOT metadata frames.
+See [the report](validation/20260923/REPORT.md) for scope and remaining issues.

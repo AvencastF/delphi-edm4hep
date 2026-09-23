@@ -1,0 +1,10 @@
+JobID|JobName|State|ExitCode|Elapsed|NodeList
+58780041|edm-weight-audit|COMPLETED|0:0|00:00:23|nid004164
+58779930|edm-weight-test|COMPLETED|0:0|00:08:15|nid004186
+58779930.extern|extern|COMPLETED|0:0|00:08:15|nid004186
+58779930.0|python3|COMPLETED|0:0|00:08:09|nid004186
+58779930.1|podman-hpc|FAILED|1:0|00:00:08|nid004186
+
+Step 58779930.1 was the initial independent metadata checker attempt with the
+singleton-parameter Python API mismatch. The full-chain step completed and the
+corrected independent checker subsequently passed under allocation 58780041.

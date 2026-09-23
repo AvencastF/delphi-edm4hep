@@ -34,6 +34,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <tuple>
 #include <vector>
 
 #include <unistd.h>
@@ -45,22 +46,29 @@ namespace delphi_edm4hep::harness {
 
 namespace {
 
+// Real data can restart event numbering in a new cartridge. MC matching
+// retains its historical (run,event) key across separately written DST passes.
+using EventKey = std::tuple<int, int, int>;
+EventKey eventKey(int run, int event, int fileSeq) {
+  return {run, run > 0 ? fileSeq : 0, event};
+}
+
 Config                            g_cfg;
 std::unique_ptr<podio::ROOTWriter> g_writer;
 
-// Pass-2 only: intermediate edm4hep reader(s) + (run, evt) -> (reader,
+// Pass-2 only: intermediate edm4hep reader(s) + EventKey -> (reader,
 // entry) index. Built once at job start in on_user00. Multiple readers
 // because a run's official short-DST events can span several .al tape
 // files (see Config::input_edm4hep_extra); the index unions them.
 std::vector<std::unique_ptr<podio::ROOTReader>>                   g_sdst_readers;
-std::map<std::pair<int, int>, std::pair<unsigned, unsigned>>      g_sdst_index;
+std::map<EventKey, std::pair<unsigned, unsigned>>      g_sdst_index;
 
 // (run, evt) of every event we have already disposed of this job —
 // written OR deliberately skipped. The data fadana delivers each event
 // as ~3 separate PHDST DST records (Records/DST ~ 3); without this we
 // emit 3 identical frames per event. (run,evt) is unique per physical
 // event, so this dedup is exact.
-std::set<std::pair<int, int>>           g_processed;
+std::set<EventKey>           g_processed;
 
 // Pointer to the currently in-flight per-event Frame so any writer
 // (or hook) needing read access during user02 can grab it.
@@ -183,11 +191,11 @@ void on_user00() noexcept {
         auto reader = std::make_unique<podio::ROOTReader>();
         reader->openFile(inters[r].string());
 
-        // Build (run, evt) -> (reader, entry-idx) index by scanning all
+        // Build EventKey -> (reader, entry-idx) index by scanning all
         // frames. Reads Frame parameters only (collection deserialization
         // is lazy in podio, so this is cheap). First occurrence wins on
-        // the (rare) duplicate key (begin-of-run records share evt across
-        // tapes); emplace keeps the earliest reader.
+        // the (rare) duplicate key; distinct data cartridges remain distinct.
+        // emplace keeps the earliest reader of an identical full key.
         const unsigned N = reader->getEntries("events");
         unsigned added = 0;
         for (unsigned i = 0; i < N; ++i) {
@@ -199,7 +207,12 @@ void on_user00() noexcept {
           const auto evt = f.getParameter<int>(
               bank::make(bank::Pass::Sdst, "EVT", "eventNumber"));
           if (run && evt) {
-            if (g_sdst_index.emplace(std::make_pair(*run, *evt),
+            const auto seq = f.getParameter<int>(
+                bank::make(bank::Pass::Sdst, "EVT", "fileSeq"));
+            if (*run > 0 && !seq) {
+              throw std::runtime_error("data intermediate lacks EVT_fileSeq");
+            }
+            if (g_sdst_index.emplace(eventKey(*run, *evt, seq.value_or(0)),
                                      std::make_pair(r, i)).second) {
               ++added;
             }
@@ -212,7 +225,7 @@ void on_user00() noexcept {
       }
       std::cout << "delphi_edm4hep::harness: " << g_sdst_readers.size()
                 << " intermediate(s), " << g_sdst_index.size()
-                << " unique (run, evt) keys total\n";
+                << " unique event keys total\n";
     }
 
     if (g_cfg.on_init) g_cfg.on_init();
@@ -248,12 +261,13 @@ static void on_user02_impl() {
   // Dedup. The data fullDST (.fadana) delivers each physical event as
   // ~3 separate PHDST DST records (Records/DST ~ 3.0); the .sdst/.al
   // streams deliver one. Without this guard we write 3 identical frames
-  // per event. Recording both written AND skipped (run,evt) here means
+  // per event. Data identity also includes the cartridge (IIFILE).
+  // Recording both written AND skipped keys here means
   // any later re-delivery of the same event is a no-op, regardless of
   // record count. Placed after the no-DST test so a header record cannot
   // consume the key of a later real event, and before the first-event skip
   // so a re-delivered begin-of-run record can never slip through.
-  const std::pair<int, int> key{ph::IIIRUN, ph::IIIEVT};
+  const auto key = eventKey(ph::IIIRUN, ph::IIIEVT, ph::IIFILE);
   if (!g_processed.insert(key).second) { ++g_n_redelivered; return; }
 
   // DELSIM's event 1 is a setup record that has a DST bank but no PV chain;

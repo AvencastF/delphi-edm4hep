@@ -794,7 +794,7 @@ is threaded through a per-event `EventContext`.
 
 | Unit | Role |
 |---|---|
-| `PhdstHarness` | PHDST init + event loop; `(run,event)` matching for pass 2; podio I/O |
+| `PhdstHarness` | PHDST init + event loop; `(run,fileSeq,event)` data matching (`(run,event)` for MC) for pass 2; podio I/O |
 | `CollectionWriter` | writer base class + `EventContext`; builds canonical collection names |
 | `pawalk` | PA-bank chain walk (`lphpa` / `iphreq` / `forEachPA`) |
 | `BankPrefix` | the `<source>_<BANK>_<ReadableName>` naming table |
@@ -852,3 +852,8 @@ B-tagging is the one place the converter also *recalculates* rather than only
 transcribing (§2.5): AABTAG is rerun at conversion time because the stored tag
 describes data and simulation differently. Both are emitted, and the
 provenance marks the rerun `Derived` and the stored tag `Transcribed`.
+
+Real-data event numbers can restart between cartridges. Use
+`(sDST_EVT_runNumber, sDST_EVT_fileSeq, sDST_EVT_eventNumber)` as the event
+identity, including when combining files. Deduplication and pass-2 matching
+use this full key for data; MC retains `(run,event)` matching.

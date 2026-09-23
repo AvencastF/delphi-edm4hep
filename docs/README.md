@@ -46,20 +46,12 @@ still override if needed.
 ./build/delphi_btag_check --source fDST  final.edm4hep.root data|mc
 ```
 
-## Tests
+## Output integrity
 
-`ctest --test-dir build` — CLI-contract checks, pure b-tag domain-boundary
-tests, and synthetic ROOT integration cases for clean/dirty `off`, wholly-NaN
-and partially-readable historical `bank`, and malformed recalc PV/track
-content. `alignment_audit` is a **no-op unless**
-`DELPHI_EDM4HEP_SAMPLE=<file.edm4hep.root>` points at a converted file. The
-two-prefix real-file integration similarly uses
-`DELPHI_EDM4HEP_TWOPASS_SAMPLE`. Single test:
-`ctest --test-dir build -R alignment_audit`.
-
-`delphi_edm4hep/tests/align_audit.py` encodes the README's "UserData array X
-is index-parallel to collection Y" contracts. Add a row whenever a new
-parallel array is emitted.
+`scripts/production/align_audit.py FILE.root` checks companion-array alignment
+and required links. The production wrapper runs it after conversion.
+Test suites and validation reports were archived outside the active repository
+at the owner's request on 2026-09-23; see `scripts/production/README.md`.
 
 ## Vendored headers, and the reference implementation
 

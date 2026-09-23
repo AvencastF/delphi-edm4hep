@@ -31,4 +31,4 @@ else
   python3 "$here/audit_root.py" "$3" my_events.fadgen "$4"
   output=$3
 fi
-python3 "$here/../../delphi_edm4hep/tests/align_audit.py" "$output"
+python3 "$here/align_audit.py" "$output"

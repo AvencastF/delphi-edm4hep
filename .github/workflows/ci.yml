@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  build:
     name: build (${{ matrix.channel }})
     runs-on: ubuntu-latest
     permissions:
@@ -35,7 +35,7 @@ jobs:
       - name: Warm cvmfs mounts
         run: ls /cvmfs/delphi.cern.ch /cvmfs/sw.hsf.org
 
-      - name: Build and test (AlmaLinux 9)
+      - name: Build (AlmaLinux 9)
         run: |
           docker run --rm \
             -v /cvmfs:/cvmfs:shared \
@@ -49,54 +49,9 @@ jobs:
           echo "key4hep \`${{ matrix.channel }}\` -> \`$(cat .key4hep-resolved 2>/dev/null || echo unknown)\`" \
             >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish the build for the data test
-        if: matrix.channel == 'production'     # stable is a build-only canary
-        uses: actions/upload-artifact@v4
-        with:
-          name: build
-          path: |
-            build/delphi_sdst_pass
-            build/delphi_fdst_pass
-            build/delphi_btag_check
-          retention-days: 5
-
-  # The build stays on the GitHub-hosted runner; only the binaries are sent to
-  # the test machine, which has 2 cores.
-  #
-  # Two repository settings are required:
-  #   Settings > Actions > General > Fork pull request workflows from outside
-  #     collaborators -> "Require approval for all external contributors"
-  #   Settings > Environments -> an environment named data-test, with required
-  #     reviewers
-  #
-  # No repository secrets are used, and no step here runs a privileged command.
-  # The inputs are CERN Open Data; data-test.sh sets
-  # DELPHI_DATA_ROOT=/eos/opendata/delphi.
-  data-test:
-    name: conversion identity (lepdata-edm4hep)
-    needs: build-and-test          # waits for every matrix channel
-    runs-on: [self-hosted, delphi-eos]
-    environment: data-test         # required-reviewer gate
-    timeout-minutes: 45
-    concurrency:
-      group: lepdata-edm4hep       # one run at a time on the machine
-      cancel-in-progress: false
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { name: build, path: build }
-      - run: chmod +x build/delphi_sdst_pass build/delphi_fdst_pass build/delphi_btag_check
-      - name: Convert and compare against the blessed references
-        run: bash .github/scripts/data-test.sh
-
-  # Runs where the blessed references live, and only once the identity test has
-  # accepted them: the collection map is generated from those references, so
-  # the page cannot describe an output the tests have not seen.
   docs-build:
     name: docs (build)
-    needs: data-test
+    needs: build
     runs-on: [self-hosted, delphi-eos]
     permissions:
       contents: read

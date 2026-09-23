@@ -11,8 +11,7 @@ Omit `-n 100` to convert the whole file. Run in a separate scratch working
 directory per file. Data mode refuses an existing output, skips MC weights and
 the FADGEN audit, and retains the collection-alignment audit. No rebuild or
 second pass is needed. Failed output is partial; do not use it. Good-run selection
-and luminosity matching remain analysis steps. Check wrapper routing locally with
-`python3 scripts/production/tests/check_convert.py`.
+and luminosity matching remain analysis steps.
 
 `convert.sh BINARY INPUT.ldst OUTPUT.root AUDIT_DIRECTORY` runs inside the pinned
 DELPHI OCI image. Its working directory must contain `my_events.fadgen` from the
@@ -38,4 +37,7 @@ an optional production-weight input and metadata hook.
 
 Wrapper and weight output passed the 2026-09-23 all-process NERSC test:
 8,000 converted events and 80 independently checked ROOT metadata frames.
-See [the report](validation/20260923/REPORT.md) for scope and remaining issues.
+Reports and retired test code are archived outside the active repositories under
+`ZtautauLEP/docs/archive/pipeline-cleanup-20260923` locally and
+`~/Ztautau/production-history/cleanup-20260923` on NERSC.
+The production alignment audit remains in `scripts/production/align_audit.py`.

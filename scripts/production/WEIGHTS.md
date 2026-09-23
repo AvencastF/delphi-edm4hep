@@ -63,14 +63,14 @@ supplies named systematic weights, extend the schema to preserve those explicitl
 
 ## Validation and deployment
 
-Local tests exercise negative weights, non-unit weights, skipped IDs, the tail,
+Archived tests exercised negative weights, non-unit weights, skipped IDs, the tail,
 wrong runs, duplicate/missing IDs, nonfinite weights and inconsistent summaries.
 The production ROOT audit reads the written event weights and generated ledger
 back and checks them against production inputs, plus converted sums and IDs.
 
 The rebuilt converter passed the 2026-09-23 NERSC all-process test: 8,000 events
 and independent metadata read-back of all 80 files. See
-[the executed report](validation/20260923/REPORT.md). Existing reusable
+the executed report in the external cleanup archive (see README). Existing reusable
 build identity checks reject the old binary after this source change. No old
 samples, frozen campaigns, build installations or jobs are changed by this edit.
 Scope is the production longDST pass-1 path; a future pass-2 or file-merging

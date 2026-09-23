@@ -103,24 +103,14 @@ takes a pre-built PDL file, such as one produced by `fatfind`, and copies it
 to `PDLINPUT` verbatim. These two options are mutually exclusive with the
 positional `<input.sdst>` argument.
 
-### Tests
+### Output integrity
 
 ```sh
-ctest --test-dir build              # everything
-ctest --test-dir build -R cli_sdst  # a subset, by name regex
+python3 scripts/production/align_audit.py out_final.edm4hep.root
 ```
 
-Two kinds of test:
-
-- **CLI argument-contract checks** — the passes and checker must reject missing
-  or invalid arguments. These need no data files.
-- **`tests/align_audit.py`** — audits a converted EDM4hep file for the
-  regression class where a UserData array is labelled parallel to the wrong
-  collection, or a relation (e.g. RecDqdx → Track) is left unset. It is a
-  skipped (exit 77) unless `DELPHI_EDM4HEP_SAMPLE` points at a converted file:
-  ```sh
-  DELPHI_EDM4HEP_SAMPLE=out_final.edm4hep.root ctest --test-dir build -R alignment_audit
-  ```
+The production wrapper runs this alignment audit automatically. Test suites
+and historical validation reports are archived outside the active repository.
 
 ---
 

@@ -106,29 +106,12 @@ quality but no luminosity, and 22 have luminosity but no quality. Selected keys
 with no luminosity record are counted and reported rather than dropped
 silently.
 
-## Checked against SKELANA
+## Historical cross-check
 
-`runquality.py` reimplements in Python what PSRUNQ does in Fortran, so it is
-checked against it. `psrunq_probe.cpp` sets an acceptance window, calls PSRUNQ
-and dumps the runs it accepts; `crosscheck.py` expands those and requires an
-exact match.
-
-    $ ./crosscheck.py
-    reference psrunq_iflrnq.txt: 209 ranges, window MVX_A>=1 MVX_C>=1 TPC_0>=7 TPC_1>=7
-    rows 44545   SKELANA accepts 36424   runquality.py accepts 36424
-    exact match
-
-`psrunq_iflrnq.txt` holds SKELANA's own window. The rows span 1990 to 2000, so
-all three row formats and the segment-code table are covered. Other windows are
-worth checking whenever the selection changes -- in particular a requirement on
-detectors 32-38, which takes a different path because the earlier files do not
-carry them -- and the probe generates them:
-
-    psrunq_probe TAG_40=7 > other.txt && ./crosscheck.py other.txt
-
-The RUNQUALI files are fixed historical data, so a reference needs regenerating
-only if its window changes; building the probe is described at the top of
-`psrunq_probe.cpp`.
+The historical PSRUNQ comparison reported an exact match for the IFLRNQ window
+across 1990–2000. The probe, reference and cross-check script are retained in the
+external 2026-09-23 cleanup archive. This historical result does not validate a
+new analysis-specific detector window.
 
 ## Data files
 

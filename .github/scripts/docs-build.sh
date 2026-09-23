@@ -1,10 +1,8 @@
 #!/bin/bash
 # Documentation build, run on the self-hosted runner.
 #
-# The collection map is generated from the blessed conversion-identity
-# references, so the published page describes the output the identity test
-# accepted. Doxygen then builds the site around it. The key4hep release is read
-# from .github/key4hep-production-release, and carries doxygen and graphviz.
+# The collection map uses the externally retained conversion references.
+# Doxygen builds the site with the pinned key4hep toolchain.
 #
 # Overrides: DELPHI_CI_REFS (reference store).
 set -e

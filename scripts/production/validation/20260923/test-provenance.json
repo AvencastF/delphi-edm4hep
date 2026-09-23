@@ -1,9 +1,0 @@
-{
-  "source_revisions": {
-    "sim": "87eac4bf567b48729c945b4a664523668df6428b",
-    "edm": "13def39d95d439e95eddf5c842e1a6d25f3213a3"
-  },
-  "controller_sha256": "d8afc4955d61ebac9b94fcccd120020a0281141dd6c5a40adb11d0821f7085c0",
-  "controller": "/global/homes/a/avencast/Ztautau/long_production/scripts/fleet.py",
-  "scope": "8 processes x 10 chunks x 100 converted events; 112 generated/chunk; 1994 v94c; scratch only"
-}

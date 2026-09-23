@@ -1,5 +1,5 @@
 #!/bin/bash
-# CI build + test recipe. Runs inside a bare AlmaLinux 9 container with
+# CI build recipe. Runs inside a bare AlmaLinux 9 container with
 # /cvmfs bind-mounted and the repo at /repo (see .github/workflows/).
 #
 #   ci-build.sh [channel]
@@ -89,7 +89,6 @@ echo "${KEY4HEP_RELEASE}" > /repo/.key4hep-resolved
 
 cmake -S /repo/delphi_edm4hep -B /repo/build
 cmake --build /repo/build -j"$(nproc)"
-ctest --test-dir /repo/build --output-on-failure
 
 # This script runs as root inside the container with the workspace bind-mounted,
 # so the build output would be root-owned on the host. Hand it back to the owner

@@ -18,7 +18,7 @@ add_compile_options(-Wall -Wextra)
 
 # A key4hep stack must be sourced before configuring. setup.sh sets PATH,
 # LD_LIBRARY_PATH, CMAKE_PREFIX_PATH and the compiler, and those must stay
-# live through build and ctest — CMake cannot do it for you. Configuring
+# live through the build — CMake cannot do it for you. Configuring
 # without a stack silently picks up whatever EDM4hep/podio/ROOT happen to be
 # visible, and that mismatch only shows up at runtime. Fail here instead.
 #
@@ -165,13 +165,6 @@ target_include_directories(delphi_btag_check PRIVATE ${CMAKE_SOURCE_DIR}/include
 target_link_libraries(delphi_btag_check
   PRIVATE EDM4HEP::edm4hep podio::podio podio::podioRootIO ROOT::Core ROOT::RIO
 )
-
-# ---------------------------------------------------------------------------
-# Tests (subtask 5+; for now just smoke).
-enable_testing()
-if(EXISTS ${CMAKE_SOURCE_DIR}/tests/CMakeLists.txt)
-  add_subdirectory(tests)
-endif()
 
 # ---------------------------------------------------------------------------
 # Install rules.

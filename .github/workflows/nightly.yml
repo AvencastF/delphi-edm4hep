@@ -27,7 +27,7 @@ jobs:
       - name: Warm cvmfs mounts
         run: ls /cvmfs/delphi.cern.ch /cvmfs/sw-nightlies.hsf.org /cvmfs/sft-nightlies.cern.ch /cvmfs/sft.cern.ch
 
-      - name: Build and test against the nightly stack
+      - name: Build against the nightly stack
         run: |
           docker run --rm \
             -v /cvmfs:/cvmfs:shared \

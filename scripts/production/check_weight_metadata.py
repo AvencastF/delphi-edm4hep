@@ -17,6 +17,11 @@ def check(work):
     if len(frames)!=1: raise ValueError('Expected one metadata frame')
     meta=frames[0]
     def get(key):return meta.get_parameter(key)
+    def vector(key):
+        value=get(key)
+        # podio's Python convenience getter unwraps singleton parameters.
+        try:return list(value)
+        except TypeError:return [value]
     def equal(key,expected):
         actual=get(key)
         if isinstance(expected,float):
@@ -28,13 +33,13 @@ def check(work):
     equal('mc_cross_section_error_pb',generation['sigma_error_mb']*1e9)
     provenance=json.loads(str(get('mc_production_json')))
     if provenance['task']!=task or provenance['generation']!=generation: raise ValueError('Embedded provenance mismatch')
-    generated=list(get('mc_generated_event_ids'))
+    generated=vector('mc_generated_event_ids')
     if generated!=sorted(records): raise ValueError('Generated IDs mismatch')
-    if list(get('mc_generated_trial_ids'))!=[int(records[e].get('generator_trial',-1)) for e in generated]: raise ValueError('Trial ledger mismatch')
-    converted=list(get('mc_converted_event_ids'));last=max(converted)
+    if vector('mc_generated_trial_ids')!=[int(records[e].get('generator_trial',-1)) for e in generated]: raise ValueError('Trial ledger mismatch')
+    converted=vector('mc_converted_event_ids');last=max(converted)
     missing=[e for e in generated if e<=last and e not in converted]
     tail=[e for e in generated if e>last]
-    if list(get('mc_missing_ids_before_last_output'))!=missing or list(get('mc_ids_after_last_output'))!=tail: raise ValueError('Loss/tail partition mismatch')
+    if vector('mc_missing_ids_before_last_output')!=missing or vector('mc_ids_after_last_output')!=tail: raise ValueError('Loss/tail partition mismatch')
     for prefix,ids in [('generated',generated),('converted',converted),('missing',missing),('after_last_output',tail)]:
         ws=[float(records[e]['weight']) for e in ids]
         for field,value in [('count',len(ids)),('sumw',math.fsum(ws)),('sumw2',math.fsum(w*w for w in ws)),

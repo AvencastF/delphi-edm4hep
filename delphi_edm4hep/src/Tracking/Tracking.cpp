@@ -25,6 +25,7 @@
 #include "delphi_edm4hep/internal/PaWalk.h"
 #include "skelana/pscvec.hpp"
 #include "skelana/psctra.hpp"
+#include "skelana/pscvtx.hpp"
 
 #include <edm4hep/ReconstructedParticleCollection.h>
 #include <edm4hep/TrackCollection.h>
@@ -132,7 +133,7 @@ void TrackingWriter::emit()
     if (vecp_i >= 1) {
       d0PvCol.push_back(sk::QTRAC(38, vecp_i) * 10.f);  // cm -> mm
       z0PvCol.push_back(sk::QTRAC(39, vecp_i) * 10.f);  // cm -> mm
-      d0BsCol.push_back(sk::QTRAC(40, vecp_i) * 10.f);  // cm -> mm
+      d0BsCol.push_back(sk::IERRBS == 0 ? sk::QTRAC(40, vecp_i) * 10.f : kNaN);  // cm -> mm
     } else {
       d0PvCol.push_back(kNaN);
       z0PvCol.push_back(kNaN);
@@ -165,7 +166,12 @@ void TrackingWriter::emit()
   //   length  track length in cm, the one selection quantity that cannot be
   //           reconstructed from the other emitted collections.
   auto push_particle_words = [&](int vecp_i, int lpa, int lmain) {
-    lvlockCol.push_back(vecp_i >= 1 ? sk::LVLOCK(vecp_i) : -1);
+    // PSHSCT uses the beam spot when no usable primary vertex exists.
+    // Preserve the particle, but do not publish that fallback as a valid cut.
+    const bool missingSelectionReference = sk::IERRBS != 0 &&
+        sk::KVTX(16, 1) > 0 && vecp_i >= 1 && sk::VECP(7, vecp_i) != 0.f;
+    lvlockCol.push_back(vecp_i >= 1 && !missingSelectionReference
+                           ? sk::LVLOCK(vecp_i) : -1);
     codeCol.push_back((ph::IQ(lpa + 3) >> 18) & 0x7F);
     detCol.push_back(ph::IQ(lpa + 2));
     lengthCol.push_back(lmain > 0 ? ph::Q(lmain + 9) : 0.f);

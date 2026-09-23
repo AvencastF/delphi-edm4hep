@@ -19,6 +19,7 @@
 #include "skelana/pscevt.hpp"
 
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -72,7 +73,9 @@ void checkEventIsUsable() {
   // VDBSPT returns without setting IERRBS when it cannot open the
   // per-processing .DB file (vdbeam.car:1167-1171), leaving the position at the
   // origin with no error raised, so BeamSpotErrorCode alone cannot be trusted.
-  if (sk::XYZBS(1) == 0.f && sk::XYZBS(2) == 0.f && sk::XYZBS(3) == 0.f) {
+  // A reported lookup failure is missing data, not a corrupt event.
+  if (sk::IERRBS == 0 && sk::XYZBS(1) == 0.f &&
+      sk::XYZBS(2) == 0.f && sk::XYZBS(3) == 0.f) {
     refuse("beam spot is exactly (0,0,0); the per-processing .DB lookup did "
            "not produce a position");
   }
@@ -135,12 +138,15 @@ void EventWriter::emit() {
   // For simulation it is instead the generated interaction point plus a
   // Gaussian smear, so it follows the event rather than describing a beam.
   auto beamspot = parameters("EVT", Provenance::Derived);
-  beamspot("BeamSpotX",      sk::XYZBS(1) * kCm2Mm);
-  beamspot("BeamSpotY",      sk::XYZBS(2) * kCm2Mm);
-  beamspot("BeamSpotZ",      sk::XYZBS(3) * kCm2Mm);
-  beamspot("BeamSpotSigmaX", sk::DXYZBS(1) * kCm2Mm);
-  beamspot("BeamSpotSigmaY", sk::DXYZBS(2) * kCm2Mm);
-  beamspot("BeamSpotSigmaZ", sk::DXYZBS(3) * kCm2Mm);
+  const auto measured = [](float value) {
+    return sk::IERRBS == 0 ? value : std::numeric_limits<float>::quiet_NaN();
+  };
+  beamspot("BeamSpotX",      measured(sk::XYZBS(1) * kCm2Mm));
+  beamspot("BeamSpotY",      measured(sk::XYZBS(2) * kCm2Mm));
+  beamspot("BeamSpotZ",      measured(sk::XYZBS(3) * kCm2Mm));
+  beamspot("BeamSpotSigmaX", measured(sk::DXYZBS(1) * kCm2Mm));
+  beamspot("BeamSpotSigmaY", measured(sk::DXYZBS(2) * kCm2Mm));
+  beamspot("BeamSpotSigmaZ", measured(sk::DXYZBS(3) * kCm2Mm));
   beamspot("BeamSpotErrorCode", sk::IERRBS);
 }
 

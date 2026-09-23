@@ -238,7 +238,13 @@ Per-event scalars stored as podio Frame parameters:
 - Energies (GeV): `ECMS` (centre-of-mass), `EChargedTotal`, `ENeutralEM`,
   `ENeutralHad`.
 - Beam spot: `BeamSpotX/Y/Z` and `BeamSpotSigmaX/Y/Z` (mm),
-  `BeamSpotErrorCode` (0 if the beamspot bank is valid).
+  `BeamSpotErrorCode` (0 for a valid lookup, 1 for an approximate preceding-run
+  fallback, 2 for a failed lookup). Nonzero status preserves the event but writes
+  NaN beam-spot coordinates/uncertainties and `QTRAC_Tracks_d0BS`, an empty
+  `BSP_BeamSpot`, and invalid/empty recalculated AABTAG output. Stored DST
+  content remains available. Charged-particle `SelectionFlag` is -1 (unknown)
+  when SKELANA had to use the unavailable beam spot instead of a usable PV.
+  A zero position with status 0 still aborts: it can indicate an unopened database.
 - Magnetic field: `BField` (Tesla) and `BFieldGevPerCm` (the
   curvature-to-momentum conversion factor).
 
@@ -373,7 +379,7 @@ VD-only and ID+VD-without-z tracks).
   not the set of tracks used by the vertex fit. In particular, do not use this
   relation for b-tag fit membership. AABTAG publishes its own vertex, and its
   `sDST_AABTAG_TrackTag` rows carry an attached-to-PV flag.
-- `sDST_BSP_BeamSpot` (Vertex, 1 entry) — the official beamspot: position with
+- `sDST_BSP_BeamSpot` (Vertex, 0 or 1 entry) — the official beamspot: position with
   a diagonal covariance built from the beam widths; `algorithmType = 2` marks
   "beamspot bank, not a fit". (See also `delphi_bs_fit` in §3.)
 - `sDST_V0_V0Candidates` (Vertex) — the official DELPHI V0 vertices (K⁰s / Λ /

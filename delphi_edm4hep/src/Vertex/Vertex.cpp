@@ -287,8 +287,8 @@ void VertexWriter::emit()
     statusBits.push_back(sk::KVTX(17, j));
   }
 
-  // ----- Beam spot (PSCBSP) -----
-  {
+  // ----- Beam spot (PSCBSP): no vertex for failed/approximate lookup -----
+  if (sk::IERRBS == 0) {
     auto bs = bspCol.create();
     bs.setPrimary(false);
     bs.setAlgorithmType(kAlgoBeamSpot);

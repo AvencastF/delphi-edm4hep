@@ -15,6 +15,7 @@ namespace delphi_edm4hep::trax {
 // build for that PA, while it is still mutable.
 struct Output {
   std::vector<std::vector<edm4hep::TrackState>> pa_to_states;
+  std::vector<std::vector<int>> pa_to_detector_ids; // same points, raw TANAGRA IDs
 };
 
 }  // namespace delphi_edm4hep::trax

@@ -358,6 +358,10 @@ void VertexWriter::emit()
       sk::QPHOC(11, i) * static_cast<float>(kCm2Mm),
       sk::QPHOC(12, i) * static_cast<float>(kCm2Mm),
     });
+    // PHC parameters v1: code, px/py/pz [GeV], E [GeV], flight length [mm].
+    phc.addToParameters(static_cast<float>(sk::KPHOC(4, i)));
+    for (int word = 5; word <= 8; ++word) phc.addToParameters(sk::QPHOC(word, i));
+    phc.addToParameters(sk::QPHOC(9, i) * static_cast<float>(kCm2Mm));
     add_particle_by_vecp(phc, sk::KPHOC(1, i));
     add_particle_by_vecp(phc, sk::KPHOC(2, i));
   }

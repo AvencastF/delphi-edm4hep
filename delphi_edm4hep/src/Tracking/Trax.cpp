@@ -18,8 +18,8 @@
 // Each point becomes an edm4hep::TrackState on the track built from the same
 // PA, so a reader walks TRAC_Tracks -> trackStates rather than a side
 // collection. The states carry no detector field, but `location` distinguishes
-// the first measured point and the calorimeter crossings. Raw surface
-// detector identities are retained in an aligned UserData array by track writers.
+// the first measured point and the calorimeter crossings. The original detector
+// identity is not retained; a calorimeter location alone does not identify HPC.
 
 #include "delphi_edm4hep/Tracking/Trax.h"
 
@@ -92,7 +92,6 @@ void TraxWriter::emit()
   pawalk::forEachPA([&](int lpa, int paIdx) {
     if (paIdx >= static_cast<int>(out.pa_to_states.size())) {
       out.pa_to_states.resize(paIdx + 1);
-      out.pa_to_detector_ids.resize(paIdx + 1);
     }
     const int ltrax = pawalk::lphpa("TRAX", lpa);
     if (ltrax <= 0) return;
@@ -121,7 +120,6 @@ void TraxWriter::emit()
 
       out.pa_to_states[paIdx].push_back(
           helix.toTrackState(locationForDetector(det_id)));
-      out.pa_to_detector_ids[paIdx].push_back(det_id);
 
       lpt += n_words + kCountWord;
     }

@@ -9,8 +9,6 @@
 #include <edm4hep/TrackCollection.h>
 #include <edm4hep/TrackState.h>
 
-#include <podio/UserDataCollection.h>
-#include <cstdint>
 #include <cstddef>
 #include <unordered_map>
 #include <vector>
@@ -41,10 +39,8 @@ void cloneTrackShallow(edm4hep::MutableTrack dst, const edm4hep::Track& src) {
 void TrackHybridWriter::emit()
 {
   edm4hep::TrackCollection trk_out;
-  podio::UserDataCollection<std::int32_t> stateDetectorIds;
 
   if (!ctx_.fdst_pa_to_sdst_track) {
-    put(std::move(stateDetectorIds), "TRAC", "Tracks_TrackStateDetectorID", Provenance::Transcribed);
     put(std::move(trk_out), "TRAC", "Tracks", Provenance::Derived);
     return;
   }
@@ -72,7 +68,6 @@ void TrackHybridWriter::emit()
   for (std::size_t i = 0; i < sdst_tracks.size(); ++i) {
     auto out = trk_out.create();
     cloneTrackShallow(out, sdst_tracks[i]);
-    for (std::size_t j = 0; j < out.getTrackStates().size(); ++j) stateDetectorIds.push_back(-1);
 
     if (!ctx_.track_elements) continue;
     const auto& te = *ctx_.track_elements;
@@ -87,21 +82,18 @@ void TrackHybridWriter::emit()
       }
       if (ctx_.trax &&
           paIdx < static_cast<int>(ctx_.trax->pa_to_states.size())) {
-        for (std::size_t j = 0; j < ctx_.trax->pa_to_states[paIdx].size(); ++j) {
-          out.addToTrackStates(ctx_.trax->pa_to_states[paIdx][j]);
-          stateDetectorIds.push_back(ctx_.trax->pa_to_detector_ids.at(paIdx).at(j));
+        for (const auto& st : ctx_.trax->pa_to_states[paIdx]) {
+          out.addToTrackStates(st);
         }
       }
       if (const auto pa = pa_to_lpa.find(paIdx); pa != pa_to_lpa.end()) {
         if (const auto b = lpa_to_btag.find(pa->second); b != lpa_to_btag.end()) {
           out.addToTrackStates(aabtag::vertexState(b->second));
-          stateDetectorIds.push_back(-1);
         }
       }
     }
   }
 
-  put(std::move(stateDetectorIds), "TRAC", "Tracks_TrackStateDetectorID", Provenance::Transcribed);
   put(std::move(trk_out), "TRAC", "Tracks", Provenance::Derived);
 }
 

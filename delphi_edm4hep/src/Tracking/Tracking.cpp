@@ -84,7 +84,6 @@ void TrackingWriter::emit()
   // before the move remain valid (podio guarantees handle stability
   // across the collection move).
   edm4hep::TrackCollection                 trkCol;
-  podio::UserDataCollection<std::int32_t> stateDetectorIds;
   edm4hep::ReconstructedParticleCollection pfoCol;
   podio::UserDataCollection<std::int32_t>  lvlockCol;
   podio::UserDataCollection<std::int32_t>  codeCol;
@@ -231,7 +230,6 @@ void TrackingWriter::emit()
 
     auto trk = trkCol.create();
     trk.addToTrackStates(helix.toTrackState(edm4hep::TrackState::AtIP));
-    stateDetectorIds.push_back(-1); // not a TRAX surface; 0 is a real TRAX ID
 
     // AABTAG measures an impact parameter for the subset of tracks it can
     // use, against its own primary vertex. That is a property of the track,
@@ -245,7 +243,6 @@ void TrackingWriter::emit()
     // measurement that was never made.
     if (auto it = lpa_to_btag.find(lpa); it != lpa_to_btag.end()) {
       trk.addToTrackStates(aabtag::vertexState(it->second));
-      stateDetectorIds.push_back(-1);
     }
 
     // Track elements reconstructed from this PA, decoded by
@@ -264,9 +261,8 @@ void TrackingWriter::emit()
 
     // Extrapolation states for this PA, decoded by TraxWriter.
     if (ctx_.trax && paIdx < static_cast<int>(ctx_.trax->pa_to_states.size())) {
-      for (std::size_t j = 0; j < ctx_.trax->pa_to_states[paIdx].size(); ++j) {
-        trk.addToTrackStates(ctx_.trax->pa_to_states[paIdx][j]);
-        stateDetectorIds.push_back(ctx_.trax->pa_to_detector_ids.at(paIdx).at(j));
+      for (const auto& st : ctx_.trax->pa_to_states[paIdx]) {
+        trk.addToTrackStates(st);
       }
     }
 
@@ -353,7 +349,6 @@ void TrackingWriter::emit()
 
   // Push all collections into the Frame via the base class's put().
   // Handles in `result` remain valid afterwards.
-  put(std::move(stateDetectorIds), "TRAC", "Tracks_TrackStateDetectorID", Provenance::Transcribed);
   put(std::move(trkCol),    "TRAC", "Tracks", Provenance::Derived);
   put(std::move(pfoCol),    "MAIN", "Particles", Provenance::Derived);
   put(std::move(lvlockCol), "VECP", "Particles_SelectionFlag", Provenance::Derived);

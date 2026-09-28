@@ -387,12 +387,7 @@ VD-only and ID+VD-without-z tracks).
   particles in the `particles` relation. (Covariance is left zero — the bank's
   weight matrix is in a non-standard basis.)
 - `sDST_PHC_PhotonConversions` (Vertex) — photon-conversion (γ→e⁺e⁻) vertices,
-  e⁺/e⁻ in the `particles` relation. Parameters added 2026-09-28: raw
-  `KPHOC(4)` code, px/py/pz [GeV], energy [GeV], flight length [mm].
-  The first value preserves its source sign: PSHPHC gives positive codes for
-  ISVER >= 103; older PXPC reading negates the bank code. Older converted
-  files have empty parameters, meaning unavailable. These are not extra MAIN
-  photons to add to visible energy.
+  e⁺/e⁻ in the `particles` relation.
 
 **Calorimeter showers**
 
@@ -863,16 +858,3 @@ Real-data event numbers can restart between cartridges. Use
 `(sDST_EVT_runNumber, sDST_EVT_fileSeq, sDST_EVT_eventNumber)` as the event
 identity, including when combining files. Deduplication and pass-2 matching
 use this full key for data; MC retains `(run,event)` matching.
-
-### Photon mapping additions — 2026-09-28 (requires reconversion)
-
-`sDST_TRAC_Tracks_TrackStateDetectorID` and its fDST counterpart are int32
-UserData aligned with the flattened TRAC TrackState vector (including AtIP and
-AtVertex entries). -1 means not a TRAX point; 0 is the actual TRAX first-point
-identifier; 9 identifies HPC, 13 HAB, 22 HAF, 26 EMF. Existing locations and
-coordinates are unchanged. Readers must check lengths and use the owning track's
-state begin/end; never infer detector identity from an arbitrary radius cut.
-The PHC parameter extension above preserves source values without creating or
-merging photons. Existing files cannot recover these dropped fields by analysis
-reprocessing alone. Both additions are local source changes, not a validated
-new converter build or production release.

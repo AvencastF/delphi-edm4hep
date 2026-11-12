@@ -156,9 +156,31 @@ and `sDST_MAIN_Particles` (from VECP) can describe different fits of the
 same track. `QTRAC(4..23)` are published raw as `sDST_QTRAC_Tracks_Perigee*`
 with `sDST_QTRAC_Tracks_PerigeeRefitted` (words ≠ PA.TRAC), and the PA.MAIN
 words SKELANA reads beside them (`IQ(LPA+3)`, mass code, energy error) as
-`sDST_MAIN_Particles_IdentificationWord`, `_MassCode`, `_EnergyError`. New
-PA or PSC words follow the same rule: raw, in the companion array of the
+`sDST_MAIN_Particles_IdentificationWord`, `_MassCode`, `_EnergyError`.
+`QTRAC(28)` and `QTRAC(41)` are `sDST_QTRAC_Tracks_FitQuality` and
+`_EnergyError`; for a refitted track `QTRAC(28)` is `CONFPV`'s χ²
+probability, not a χ² (`mammoth.car`, `CONFPV`: `PCHI = PROB(CHISQ, NDEG)`).
+New PA or PSC words follow the same rule: raw, in the companion array of the
 collection they describe, NaN where there is no source.
+
+**SKELANA's selection word.** `LVSELE` (common `/TRKINF/`, keep `TRACKNTP`
+in `stdcdes.car`; bound in `skelana/trackntp.hpp`) is indexed by VECP row
+like `LVLOCK`, which receives its bits 1 and 32 at the end of `PSHORTTRK`.
+Entries above `LVWORK = 2*MTRACK` are SKELANA's scratch for recovered
+tracks and are not published. `sDST_VECP_Particles_SelectionWord` is the
+row's word, raw. Two source facts matter when reading it:
+- `PSHCTRECCAL` stores the recovered track's *neutral* cut bits (`INTFAIL`)
+  in bits 2–11 of its work word, contrary to the `PSHORTSEL` header; the
+  charged failure reason of a recovered track is not kept.
+- With `IFLODR = 1` the recovered neutrals are re-entered after the PA loop,
+  when `INREC` already counts every recovery, so `PSHCHREC`'s
+  `LVSELE(I) = LVSELE(LVWORK+INREC)` (and the same for `LVLOCK`) gives each of
+  them the last track's word. With `IFLODR = 0` the copy happens right after
+  each recovery and is correct.
+The per-track failure words `ICTFAIL` (`/CHGEDTRK/`), `INTFAIL` (`/NEUTRK/`)
+and the counter `INREC` (`/RECOVER/`) are scalars overwritten for every
+track, so after the event they describe only the last one; they are not
+published.
 
 The PSCVTX primary slot has its own per-event geometry sentinel. `Vertex.cpp`
 falls back to the raw ZEBRA chain (`LQ(LDTOP-1)`) whenever that slot is

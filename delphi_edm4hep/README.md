@@ -282,11 +282,12 @@ count beside a table-3 per-track flag.
 
 To apply a different table yourself, the inputs are all in the output:
 momentum and the impact parameters, plus `sDST_MAIN_Particles_TrackLength`
-(no other route), `sDST_MAIN_Particles_EnergyError`
-(the Δp/p cut; for a refitted track SKELANA cut on the refit's error, which
-follows from the `sDST_QTRAC_Tracks_Perigee*` weight matrix) and
+(no other route), `sDST_QTRAC_Tracks_EnergyError`
+(the error SKELANA's Δp/p cut read: PA.MAIN word 19, or the refit's error for
+a refitted track) and
 `sDST_MAIN_Particles_ReconstructionCode` (the word SKELANA reads to reject
-VD-only and ID+VD-without-z tracks).
+VD-only and ID+VD-without-z tracks). Which of its cuts a particle failed is
+in `sDST_VECP_Particles_SelectionWord`.
 
 ### 2.2 Pass-1 collections (`sDST_*`, `xsDST_*`, `lDST_*`)
 
@@ -355,9 +356,24 @@ VD-only and ID+VD-without-z tracks).
   `Perigee*` words differ bit for bit from the track's PA.TRAC words, which in
   SKELANA only the refit does; 0 when they are identical; −1 without an own
   VECP row. Parallel to `sDST_TRAC_Tracks`. A refit that reproduced its input
-  exactly would read 0. SKELANA keeps no record of the refit itself (its
-  `LVSELE` recovery bit 21 is not published and covers only the
-  excessive-momentum path).
+  exactly would read 0. SKELANA keeps no record of the refit itself: the
+  `SelectionWord` recovery bit 21 covers only the excessive-momentum path.
+- `sDST_QTRAC_Tracks_FitQuality` (UserData&lt;float&gt;) — `QTRAC(28)`, raw,
+  parallel to `sDST_TRAC_Tracks`; NaN without an own VECP row. **Two
+  meanings, told apart by `PerigeeRefitted`.** Not refitted (0): PA.MAIN
+  word 16, the χ² of the fit without VD (`PSHTRA`), which is the
+  `sDST_TRAC_Tracks` `chi2` whenever that comes from the without-VD fit
+  (the track `chi2` prefers the with-VD fit, words 26/27). Refitted (1): the
+  `PCHI` of SKELANA's vertex-constrained refit (`CONFPV`), which is the χ²
+  **probability** `PROB(χ², ndf)`, at least 0.01 because `CONFPV` rejects
+  fits below that — not a χ².
+- `sDST_QTRAC_Tracks_EnergyError` (UserData&lt;float&gt;) — `QTRAC(41)`, GeV,
+  raw, parallel to `sDST_TRAC_Tracks`; NaN without an own VECP row. Not
+  refitted: PA.MAIN word 19, so equal to the owning particle's
+  `sDST_MAIN_Particles_EnergyError`. Refitted: the momentum error `PERR`
+  that `PSHCTRECPBS` computes from the refit's covariance. SKELANA's Δp/p
+  cut reads this word; for an excessive-momentum refit (bit 21) it read it
+  before the refit replaced it.
 - `sDST_VECP_Particles_SelectionFlag` (UserData&lt;int32&gt;) — raw per-particle DELPHI lock/status
   mask (`LVLOCK`); bit 1 marks track-selection failure and bit 32 multi-vertex/REMCLU
   locking. Other bits are preserved without reinterpretation. It has one
@@ -366,6 +382,35 @@ VD-only and ID+VD-without-z tracks).
   or 3), or a verdict that relied on an unavailable beam spot (status 0 or 2,
   `sDST_EVT_BeamSpotErrorCode ≠ 0`). Neutrals carry a real verdict, since they
   go through selection too. Parallel to `sDST_MAIN_Particles`.
+- `sDST_VECP_Particles_SelectionWord` (UserData&lt;int32&gt;) — SKELANA's
+  per-row selection word `LVSELE` (common `TRKINF`), raw, from which it sets
+  `LVLOCK` bits 1 and 32. Parallel to `sDST_MAIN_Particles`; −1 without an
+  own VECP row (`VecpStatus` 1 or 3, as `SelectionFlag`; no real word has
+  every bit set). Unlike `SelectionFlag` it is not masked when the beam spot
+  was unavailable; the impact-parameter bits were then computed against it.
+  Bits (DELPHI numbering, bit 1 = least significant), from the `PSHORTSEL`
+  header and the code that fills them:
+
+  | Bit | Meaning |
+  |---|---|
+  | 1 | rejected by the selection (copied to `SelectionFlag` bit 1) |
+  | 2–11 | which cuts failed: charged row (`PSHSCT`): 2 no MAIN module, 3 momentum below minimum, 4 track length, 5 \|cos θ\|, 6 r-φ impact, 7 z impact, 8 excessive momentum, 9 Δp/p, 10 VD-only (or VFT-only), 11 ID+VD without z (DST version < 107 only). Neutral row (`PSHSNT`): 2 no MAIN module, 3 \|cos θ\|, 4 HPC, 5 FEMC, 6 HCAL energy or noise, 7 STIC energy or off-momentum veto; 8–11 never set. |
+  | 20 | recovered as a neutral from calorimeter deposits (only on `VecpStatus` 2) |
+  | 21 | accepted after the beam-spot-constrained refit of an excessive-momentum track |
+  | 22 | accepted after the mammoth momentum recovery |
+  | 30, 31 | REMCLU cluster / PA in a REMCLU cluster (REMCLU is off here, so 0) |
+  | 32 | track from a locked vertex (multivertex handling, `IFLVEC = 22`; copied to `SelectionFlag` bit 32) |
+
+  Bits 12–19 and 23–29 are reserved by SKELANA. A track accepted by
+  recovery (21, 22) keeps the failure bits that sent it there, with bit 1
+  clear. A recovered neutral (`VecpStatus` 2) carries bit 20 and, in bits
+  2–7, the neutral-cut bits of its calorimeter deposits (`PSHCTRECCAL`
+  copies `INTFAIL`, although the `PSHORTSEL` header says the charged bits);
+  why its charged track failed is not kept by SKELANA. **With this
+  converter's `IFLODR = 1`, every recovered neutral of an event carries the
+  word (and `SelectionFlag`) of the last track recovered in that event**:
+  `PSHCHREC` copies `LVSELE(LVWORK+INREC)` after all recoveries are
+  counted. Published as SKELANA left it.
 - `sDST_MAIN_Particles_VecpStatus` (UserData&lt;int32&gt;) — how the entry
   relates to SKELANA's VECP particle list. Parallel to `sDST_MAIN_Particles`.
 
@@ -387,8 +432,8 @@ VD-only and ID+VD-without-z tracks).
   summing finite MAIN 4-vectors counts the recovered energy once. Its PA
   words (`ReconstructionCode`, `DetectorMask`, `TrackLength`) repeat those of
   the source PA; so do `ChargeCode`, `IdentificationWord`, `MassCode` and
-  `EnergyError`. SKELANA's record of which charged cut failed (`LVSELE`
-  bits 2–11) is not published.
+  `EnergyError`. Its `SelectionWord` is that of the recovered row (see
+  there for what it holds).
 
   > Earlier revisions (up to `d09cd51`) wrote 0 for the 4-momentum of status
   > 1 and 3 entries, did not emit the recovered neutral, and attached the
@@ -437,8 +482,8 @@ VD-only and ID+VD-without-z tracks).
   set from it.
 - `sDST_MAIN_Particles_EnergyError` (UserData&lt;float&gt;) — PA.MAIN word
   19, GeV, as stored. SKELANA uses it as the energy (momentum) error in its
-  Δp/p cut and copies it to `QTRAC(41)`; a refit replaces `QTRAC(41)` but not
-  this word. SKELANA defines no unset value for it, so none is mapped.
+  Δp/p cut and copies it to `QTRAC(41)` (`sDST_QTRAC_Tracks_EnergyError`);
+  a refit replaces `QTRAC(41)` but not this word. SKELANA defines no unset value for it, so none is mapped.
 - `sDST_MAIN_Particles_TrackLength` (UserData&lt;float&gt;) — track length in cm
   (PA.MAIN word 9, as stored), parallel to `sDST_MAIN_Particles`.
 - `sDST_MAIN_Particles_DetectorMask` (UserData&lt;int32&gt;) — which subdetectors were used

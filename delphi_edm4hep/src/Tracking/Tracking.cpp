@@ -4,7 +4,8 @@
 //   <prefix>_TRAC_Tracks    (Track + TrackState[AtIP] + 5x5 helix-basis cov)
 //   <prefix>_MAIN_Particles (charged + neutral; 4-mom from sk::VECP)
 //   <prefix>_VECP_Particles_SelectionFlag       (UserData int32)
-//   <prefix>_MAIN_Particles_VecpStatus          (UserData int32, VecpStatus)
+//   <prefix>_VECP_Particles_SelectionWord       (UserData int32, LVSELE)
+//   <prefix>_MAIN_Particles_VecpStatus         (UserData int32, VecpStatus)
 //   <prefix>_MAIN_Particles_ChargeCode          (UserData int32, PA.MAIN charge code)
 //   <prefix>_VECP_Particles_Charge              (UserData float, VECP(7))
 //   <prefix>_MAIN_Particles_ReconstructionCode  (UserData int32)
@@ -18,6 +19,8 @@
 //   <prefix>_QTRAC_Tracks_d0PV / _z0PV / _d0BS  (UserData float; QTRAC 38..40)
 //   <prefix>_QTRAC_Tracks_Perigee*              (UserData float; QTRAC 4..23)
 //   <prefix>_QTRAC_Tracks_PerigeeRefitted       (UserData int32)
+//   <prefix>_QTRAC_Tracks_FitQuality            (UserData float; QTRAC 28)
+//   <prefix>_QTRAC_Tracks_EnergyError           (UserData float; QTRAC 41)
 //
 // No shape moments, no sigma calibration, no perigee-momentum fallback —
 // bank-truth values only (those custom operations are intentionally
@@ -34,6 +37,7 @@
 #include "skelana/pscvec.hpp"
 #include "skelana/psctra.hpp"
 #include "skelana/pscvtx.hpp"
+#include "skelana/trackntp.hpp"
 
 #include <edm4hep/ReconstructedParticleCollection.h>
 #include <edm4hep/TrackCollection.h>
@@ -109,6 +113,7 @@ void TrackingWriter::emit()
   edm4hep::TrackCollection                 trkCol;
   edm4hep::ReconstructedParticleCollection pfoCol;
   podio::UserDataCollection<std::int32_t>  lvlockCol;
+  podio::UserDataCollection<std::int32_t>  lvseleCol;
   podio::UserDataCollection<std::int32_t>  statusCol;
   podio::UserDataCollection<std::int32_t>  chargeCodeCol;
   podio::UserDataCollection<float>         vecpChargeCol;
@@ -123,6 +128,8 @@ void TrackingWriter::emit()
   podio::UserDataCollection<float>         d0BsCol;
   std::array<podio::UserDataCollection<float>, kPerigeeWords> perigeeCols;
   podio::UserDataCollection<std::int32_t>  refittedCol;
+  podio::UserDataCollection<float>         fitQualityCol;
+  podio::UserDataCollection<float>         qtracEnergyErrorCol;
 
   Output result;
   result.particle_handles.reserve(static_cast<std::size_t>(sk::NVECP + 1));
@@ -172,7 +179,15 @@ void TrackingWriter::emit()
   // VECP charge are refilled from the same refit). Refitted = 1 when the
   // stored words differ bit for bit from the track's PA.TRAC words, 0 when
   // they are identical, -1 without an own VECP row (words NaN).
+  //
+  // Fit words QTRAC(28) and QTRAC(41), as stored, NaN without an own row.
+  // PSHTRA copies PA.MAIN word 16 (chi2 of the fit without VD) and word 19
+  // (energy error, GeV) there; a kept refit replaces them with CONFPV's
+  // PCHI, which is the chi2 *probability* PROB(chi2, ndf) >= 0.01 and not a
+  // chi2, and with the refit's momentum error PERR (GeV). Refitted says which.
   auto push_qtrac_or_nan = [&](int vecp_i, int ltrac) {
+    fitQualityCol.push_back(vecp_i >= 1 ? sk::QTRAC(28, vecp_i) : kNaN);
+    qtracEnergyErrorCol.push_back(vecp_i >= 1 ? sk::QTRAC(41, vecp_i) : kNaN);
     if (vecp_i >= 1) {
       d0PvCol.push_back(qtrac_mm(38, vecp_i));
       z0PvCol.push_back(qtrac_mm(39, vecp_i));
@@ -218,6 +233,13 @@ void TrackingWriter::emit()
   //           carry a real verdict rather than a sentinel. -1 = no usable
   //           verdict: no VECP row, or the verdict relied on an unavailable
   //           beam spot. VecpStatus says which.
+  //   LVSELE  SKELANA's per-row selection word (TRKINF), raw: bit 1 and 32
+  //           are the ones copied into LVLOCK; 2-11 the failed cuts (ICTFAIL
+  //           or INTFAIL shifted up by one), 20-22 the recovery step. -1
+  //           without an own VECP row (no real word has every bit set).
+  //           With IFLODR = 1, PSHCHREC gives every recovered neutral of an
+  //           event the work word of the last track recovered (LVWORK+INREC);
+  //           published as SKELANA left it.
   //   status  VecpStatus of the entry.
   //   charge code  PA.MAIN Q(LMAIN+8) as stored: 0 neutral, 1 positive,
   //           2 negative, 3 undefined. The particle charge is derived from it.
@@ -247,6 +269,7 @@ void TrackingWriter::emit()
         sk::KVTX(16, 1) > 0 && chargedPa;
     lvlockCol.push_back(vecp_i >= 1 && !missingSelectionReference
                            ? sk::LVLOCK(vecp_i) : -1);
+    lvseleCol.push_back(vecp_i >= 1 ? sk::LVSELE(vecp_i) : -1);
     statusCol.push_back(static_cast<std::int32_t>(status));
     chargeCodeCol.push_back(static_cast<std::int32_t>(std::lround(ph::Q(lmain + 8))));
     vecpChargeCol.push_back(vecp_i >= 1 ? sk::VECP(7, vecp_i) : kNaN);
@@ -462,6 +485,7 @@ void TrackingWriter::emit()
   put(std::move(trkCol),    "TRAC", "Tracks", Provenance::Derived);
   put(std::move(pfoCol),    "MAIN", "Particles", Provenance::Derived);
   put(std::move(lvlockCol), "VECP", "Particles_SelectionFlag", Provenance::Derived);
+  put(std::move(lvseleCol), "VECP", "Particles_SelectionWord", Provenance::Derived);
   put(std::move(statusCol), "MAIN", "Particles_VecpStatus",     Provenance::Derived);
   put(std::move(chargeCodeCol), "MAIN", "Particles_ChargeCode", Provenance::Transcribed);
   put(std::move(vecpChargeCol), "VECP", "Particles_Charge",     Provenance::Transcribed);
@@ -478,6 +502,8 @@ void TrackingWriter::emit()
     put(std::move(perigeeCols[w]), "QTRAC", kPerigeeNames[w], Provenance::Derived);
   }
   put(std::move(refittedCol), "QTRAC", "Tracks_PerigeeRefitted", Provenance::Derived);
+  put(std::move(fitQualityCol), "QTRAC", "Tracks_FitQuality", Provenance::Derived);
+  put(std::move(qtracEnergyErrorCol), "QTRAC", "Tracks_EnergyError", Provenance::Derived);
 
   // Hand off to downstream writers via the shared context.
   ctx_.tracking = std::move(result);

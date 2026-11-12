@@ -15,6 +15,10 @@ are kept — `pscbtg.hpp` was added when b-tagging output was implemented — th
 common blocks we never read, and everything else in delphi-nanoaod
 (nanoaod writers, python, scripts) are intentionally not vendored.
 
+`skelana/trackntp.hpp` (the `TRKINF` common, SKELANA's per-track selection
+word `LVSELE`, from the `TRACKNTP` keep in `stdcdes.car`) has no upstream
+counterpart: it was written here, in the same style, and a re-copy must keep it.
+
 ## Updating
 
 Re-copy the needed headers from a delphi-nanoaod checkout and update the

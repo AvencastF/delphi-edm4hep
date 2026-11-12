@@ -10,7 +10,11 @@ one particle, charge consistent with the raw charge code, VECP charge NaN
 exactly where no own VECP row exists, ReconstructionCode = bits 19-25 of the
 PA identification word, recovered neutrals repeating their source's PA words,
 SKELANA perigee words NaN exactly where no own VECP row exists and equal to
-the AtIP state wherever they are not marked refitted). It
+the AtIP state wherever they are not marked refitted, the QTRAC fit words NaN
+exactly there too, an unrefitted QTRAC energy error equal to PA.MAIN word 19
+and a refit's fit quality a probability >= 0.01, the LVSELE selection word -1
+exactly without an own row, SelectionFlag equal to its bits 1 and 32, and bit
+20 on every recovered neutral). It
 guards the bug class where a per-particle array is emitted alongside a track
 collection, so consumers read the wrong row. Value-level checks cannot see it,
 and it only shows on events with a reconstructed neutral (Particles > Tracks):
@@ -60,8 +64,9 @@ def f32(x):
     return struct.unpack("f", struct.pack("f", x))[0]
 
 
-def perigee_violations(perigee, track, status):
-    """SKELANA perigee words of one track against its status and AtIP state."""
+def perigee_violations(perigee, track, status, fit=None, pa_error=None):
+    """SKELANA perigee and fit words of one track against its status, its
+    particle's PA energy error and its AtIP state."""
     k = track.getObjectID().index
     flag = int(perigee["Refitted"][k])
     words = [float(v[k]) for n, v in perigee.items() if n != "Refitted"]
@@ -71,6 +76,17 @@ def perigee_violations(perigee, track, status):
     if any(w != w for w in words) != (flag == -1) or \
             all(w != w for w in words) != (flag == -1):
         bad.append(f"perigee words NaN pattern wrong for PerigeeRefitted {flag}")
+    if fit:
+        # QTRAC(28)/(41): NaN exactly without an own row; unrefitted QTRAC(41)
+        # is PA.MAIN word 19; a refit's QTRAC(28) is CONFPV's chi2
+        # probability, which CONFPV only accepts at >= 0.01.
+        quality, error = float(fit["FitQuality"][k]), float(fit["EnergyError"][k])
+        if (quality != quality) != (flag == -1) or (error != error) != (flag == -1):
+            bad.append(f"fit words NaN pattern wrong for PerigeeRefitted {flag}")
+        if flag == 0 and pa_error is not None and not same(error, pa_error):
+            bad.append("unrefitted QTRAC EnergyError differs from PA.MAIN word 19")
+        if flag == 1 and not f32(0.01) <= quality <= 1:
+            bad.append("refitted FitQuality outside the CONFPV probability range")
     if flag == 0:
         # Not refitted: the words are PA.TRAC, the source of the AtIP state
         # (Helix::fromPerigee: D0 = -10 d0, Z0 = 10 z0, omega = 1/R / 10).
@@ -117,6 +133,17 @@ def vecp_status_violations(fr, names, prefix="sDST"):
     if "Refitted" not in perigee or \
             any(len(v) != len(tracks) for v in perigee.values()):
         perigee = {}
+    fit = {w: fr.get(f"{prefix}_QTRAC_Tracks_{w}") for w in
+           ("FitQuality", "EnergyError")
+           if f"{prefix}_QTRAC_Tracks_{w}" in names}
+    if len(fit) != 2 or any(len(v) != len(tracks) for v in fit.values()):
+        fit = None
+    # SKELANA's LVSELE word and the LVLOCK verdict built from its bits 1, 32.
+    sel = {w: fr.get(f"{prefix}_VECP_Particles_{w}") for w in
+           ("SelectionWord", "SelectionFlag")
+           if f"{prefix}_VECP_Particles_{w}" in names}
+    if len(sel) != 2 or any(len(v) != len(ps) for v in sel.values()):
+        sel = None
     bad = []
     owners = {}
     for i, p in enumerate(ps):
@@ -156,8 +183,20 @@ def vecp_status_violations(fr, names, prefix="sDST"):
             bad.append("ReconstructionCode is not IdentificationWord bits 19-25")
         if s == 2 and any(not same(v[i], v[i - 1]) for v in pa.values()):
             bad.append("recovered neutral PA words differ from its source")
+        if sel is not None:
+            word = int(sel["SelectionWord"][i]) & 0xFFFFFFFF
+            flag = int(sel["SelectionFlag"][i]) & 0xFFFFFFFF
+            if (word == 0xFFFFFFFF) != (s in (1, 3)):
+                bad.append(f"SelectionWord -1 pattern wrong for status {s}")
+            elif s in (0, 2) and flag != 0xFFFFFFFF and \
+                    flag != word & 0x80000001:
+                bad.append("SelectionFlag is not SelectionWord bits 1 and 32")
+            if s == 2 and not word >> 19 & 1:
+                bad.append("recovered neutral without SelectionWord bit 20")
         if perigee and len(p.getTracks()) == 1:
-            bad.extend(perigee_violations(perigee, list(p.getTracks())[0], s))
+            bad.extend(perigee_violations(
+                perigee, list(p.getTracks())[0], s, fit,
+                float(pa["EnergyError"][i]) if "EnergyError" in pa else None))
         for c in p.getClusters():
             oid = c.getObjectID()
             key = (oid.collectionID, oid.index)

@@ -17,7 +17,7 @@ with Path('event-weights.csv').open() as stream:
  weight_rows={int(r['hepmc_event']):r for r in csv.DictReader(stream)}
 expected_run=-int(json.loads(Path('task.json').read_text())['run'])
 observed_weights=[]
-reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0,charge_codes=collections.Counter(),vecp_charges=collections.Counter(),mass_codes=collections.Counter(),perigee_refitted=collections.Counter())
+reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0,charge_codes=collections.Counter(),vecp_charges=collections.Counter(),mass_codes=collections.Counter(),perigee_refitted=collections.Counter(),selection_bits=collections.Counter())
 for i,fr in enumerate(reader.get('events')):
  run=int(fr.get_parameter('sDST_EVT_runNumber')); evt=int(fr.get_parameter('sDST_EVT_eventNumber')); ids.append((run,evt))
  weight=float(fr.get_parameter('mc_gen_weight'))
@@ -47,6 +47,10 @@ for i,fr in enumerate(reader.get('events')):
   if status[index]!=2: reco_diagnostics['mass_codes'][int(masscodes[index])]+=1
  # SKELANA perigee words: 1 refitted (differ from PA.TRAC), 0 equal, -1 no own VECP row.
  for flag in fr.get('sDST_QTRAC_Tracks_PerigeeRefitted'): reco_diagnostics['perigee_refitted'][int(flag)]+=1
+ # SKELANA's LVSELE word: which bits (1 = least significant) are set, by VecpStatus; -1 = no own row.
+ for word,s in zip(fr.get('sDST_VECP_Particles_SelectionWord'),status):
+  word=int(word)&0xFFFFFFFF
+  for bit in ([0] if word==0xFFFFFFFF else [b+1 for b in range(32) if word>>b&1]): reco_diagnostics['selection_bits']['status%d_bit%d'%(s,bit)]+=1
  charged=sum(p.getCharge()!=0 for p in ps)
  for index,p in enumerate(ps):
   v=p.getMomentum()

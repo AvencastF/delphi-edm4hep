@@ -6,6 +6,9 @@
 //                                    charged VECP row, plus SKELANA's
 //                                    recovered neutral as its own entry
 //   <prefix>_VECP_Particles_SelectionFlag  UserData<int32>
+//   <prefix>_VECP_Particles_SelectionWord  UserData<int32>, SKELANA's LVSELE
+//                                    of the entry's own row, raw; -1 without
+//                                    one
 //   <prefix>_MAIN_Particles_VecpStatus     UserData<int32>, VecpStatus
 //                                    (TrackingData.h)
 //   <prefix>_MAIN_Particles_ChargeCode     UserData<int32>, raw PA.MAIN
@@ -22,6 +25,12 @@
 //                                    UserData<int32>: 1 = QTRAC(4..23) differ
 //                                    from PA.TRAC (SKELANA refit), 0 = equal,
 //                                    -1 = no own VECP row
+//   <prefix>_QTRAC_Tracks_FitQuality / _EnergyError
+//                                    UserData<float>, QTRAC(28) / QTRAC(41)
+//                                    raw: PA.MAIN words 16 / 19 unless
+//                                    refitted, then CONFPV's chi2 probability
+//                                    / the refit momentum error (GeV); NaN
+//                                    without an own VECP row
 //   <prefix>_QTRAC_Tracks_d0PV / _z0PV / _d0BS
 //                                    UserData<float> from QTRAC(38..40); mm
 //                                    (cm x10), DELPHI sign, parallel to

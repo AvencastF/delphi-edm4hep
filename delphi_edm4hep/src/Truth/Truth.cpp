@@ -172,8 +172,8 @@ void TruthGenWriter::emit() {
   // SXSHST/SXSDK): a particle with an ST bank starts at that ST's vertex; a
   // decaying one (SXSDK) ends at a secondary vertex from which the STs of its
   // final-state descendants hang -- including those reached through daughters
-  // without an ST (e.g. pi0 -> gamma gamma: LUND gives the pi0 no lifetime,
-  // so it has no ST and its photons start at the tau's decay vertex). A
+  // without an ST (e.g. a generator-decayed pi0 that DELSIM does not decay
+  // itself has no ST; its photons start at the tau's decay vertex). A
   // particle without an ST is therefore produced at its mother's decay point
   // and decays where it is produced; with no mother either, it is at the
   // simulated primary. Real data (nGen = 0) never reads sim banks -> empty

@@ -308,11 +308,12 @@ in `sDST_VECP_Particles_SelectionWord`.
     were published as mm plus a per-event mm shift, so vertex differences were
     10× too small.
   - Only an entry whose SH has an ST bank has a vertex of its own. DELSIM
-    gives an ST to final-state particles and to particles it decays with a
-    lifetime (`SXSHST`/`SXSDK`); a generator-decayed particle without a LUND
-    lifetime (π⁰, ρ, the Z, documentation lines) has none, and DELSIM starts
-    its daughters at the decay vertex of the nearest ancestor with an ST, or
-    at the primary. The converter publishes exactly that placement and says
+    gives an ST to final-state particles and to the generator-decayed
+    particles it treats as decays with a flight (`SXSHST`/`SXSDK`: τ, B, D,
+    …); the others (the Z, quarks and gluons, ρ, ω, η, K*, documentation
+    lines, and part of the π⁰: about a quarter of those from τ decay in the
+    2026-11-12 test samples) have none, and DELSIM starts their daughters at
+    the decay vertex of the nearest ancestor with an ST, or at the primary. The converter publishes exactly that placement and says
     which rule applied:
 - `sDST_LUJ_GenParticles_VertexStatus` (UserData&lt;int32&gt;) — parallel to
   `sDST_LUJ_GenParticles`.

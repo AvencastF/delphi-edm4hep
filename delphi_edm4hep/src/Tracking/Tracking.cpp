@@ -8,11 +8,16 @@
 //   <prefix>_MAIN_Particles_ChargeCode          (UserData int32, PA.MAIN charge code)
 //   <prefix>_VECP_Particles_Charge              (UserData float, VECP(7))
 //   <prefix>_MAIN_Particles_ReconstructionCode  (UserData int32)
+//   <prefix>_MAIN_Particles_IdentificationWord  (UserData int32, IQ(LPA+3))
 //   <prefix>_MAIN_Particles_DetectorMask        (UserData int32)
+//   <prefix>_MAIN_Particles_MassCode            (UserData int32, PA.MAIN word 10)
+//   <prefix>_MAIN_Particles_EnergyError         (UserData float, PA.MAIN word 19)
 //
 // Each Track links to the track elements from its PA (see TrackElements).
 //   <prefix>_MAIN_Particles_TrackLength         (UserData float, cm)
 //   <prefix>_QTRAC_Tracks_d0PV / _z0PV / _d0BS  (UserData float; QTRAC 38..40)
+//   <prefix>_QTRAC_Tracks_Perigee*              (UserData float; QTRAC 4..23)
+//   <prefix>_QTRAC_Tracks_PerigeeRefitted       (UserData int32)
 //
 // No shape moments, no sigma calibration, no perigee-momentum fallback —
 // bank-truth values only (those custom operations are intentionally
@@ -37,6 +42,7 @@
 #include <podio/UserDataCollection.h>
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -52,6 +58,19 @@ namespace aa = delphi_edm4hep::aabtag;
 namespace {
 constexpr double kCm2Mm = 10.0;
 constexpr float  kNotMeasured = std::numeric_limits<float>::quiet_NaN();
+
+// QTRAC(4..23), SKELANA's track parameters in PA.TRAC words 2..21 layout:
+// perigee (d0, z0, theta, phi, 1/R) then the 15-word lower-triangular weight
+// matrix of those five, row by row. Published raw, in DELPHI units.
+constexpr int kPerigeeWords = 20;
+constexpr std::array<const char*, kPerigeeWords> kPerigeeNames = {
+    "Tracks_PerigeeD0",       "Tracks_PerigeeZ0",       "Tracks_PerigeeTheta",
+    "Tracks_PerigeePhi",      "Tracks_PerigeeInvR",
+    "Tracks_PerigeeWeight11", "Tracks_PerigeeWeight21", "Tracks_PerigeeWeight22",
+    "Tracks_PerigeeWeight31", "Tracks_PerigeeWeight32", "Tracks_PerigeeWeight33",
+    "Tracks_PerigeeWeight41", "Tracks_PerigeeWeight42", "Tracks_PerigeeWeight43",
+    "Tracks_PerigeeWeight44", "Tracks_PerigeeWeight51", "Tracks_PerigeeWeight52",
+    "Tracks_PerigeeWeight53", "Tracks_PerigeeWeight54", "Tracks_PerigeeWeight55"};
 }  // namespace
 
 namespace delphi_edm4hep::tracking {
@@ -94,11 +113,16 @@ void TrackingWriter::emit()
   podio::UserDataCollection<std::int32_t>  chargeCodeCol;
   podio::UserDataCollection<float>         vecpChargeCol;
   podio::UserDataCollection<std::int32_t>  codeCol;
+  podio::UserDataCollection<std::int32_t>  idWordCol;
   podio::UserDataCollection<std::int32_t>  detCol;
+  podio::UserDataCollection<std::int32_t>  massCodeCol;
+  podio::UserDataCollection<float>         energyErrorCol;
   podio::UserDataCollection<float>         lengthCol;
   podio::UserDataCollection<float>         d0PvCol;
   podio::UserDataCollection<float>         z0PvCol;
   podio::UserDataCollection<float>         d0BsCol;
+  std::array<podio::UserDataCollection<float>, kPerigeeWords> perigeeCols;
+  podio::UserDataCollection<std::int32_t>  refittedCol;
 
   Output result;
   result.particle_handles.reserve(static_cast<std::size_t>(sk::NVECP + 1));
@@ -141,7 +165,14 @@ void TrackingWriter::emit()
     const float cm = sk::QTRAC(k, vecp_i);
     return cm == -999.f ? kNaN : cm * 10.f;  // cm -> mm
   };
-  auto push_qtrac_or_nan = [&](int vecp_i) {
+  //
+  // Perigee words: QTRAC(4..23) as stored. PSHTRA copies PA.TRAC words 2..21
+  // there; PSHCTRECPBS, the only other writer, replaces them with its
+  // primary-vertex-constrained refit (the VECP 4-vector, QTRAC 38..40 and the
+  // VECP charge are refilled from the same refit). Refitted = 1 when the
+  // stored words differ bit for bit from the track's PA.TRAC words, 0 when
+  // they are identical, -1 without an own VECP row (words NaN).
+  auto push_qtrac_or_nan = [&](int vecp_i, int ltrac) {
     if (vecp_i >= 1) {
       d0PvCol.push_back(qtrac_mm(38, vecp_i));
       z0PvCol.push_back(qtrac_mm(39, vecp_i));
@@ -151,6 +182,15 @@ void TrackingWriter::emit()
       z0PvCol.push_back(kNaN);
       d0BsCol.push_back(kNaN);
     }
+    bool refitted = false;
+    for (int w = 0; w < kPerigeeWords; ++w) {
+      const float stored = vecp_i >= 1 ? sk::QTRAC(4 + w, vecp_i) : kNaN;
+      perigeeCols[w].push_back(stored);
+      refitted = refitted || (vecp_i >= 1 &&
+          std::bit_cast<std::uint32_t>(stored) !=
+          std::bit_cast<std::uint32_t>(ph::Q(ltrac + 2 + w)));
+    }
+    refittedCol.push_back(vecp_i >= 1 ? refitted : -1);
   };
 
   using namespace delphi_edm4hep::pawalk;
@@ -189,10 +229,15 @@ void TrackingWriter::emit()
   //   code    PXPHOT reconstruction code, IQ(LPA+3) bits 19-25. SKELANA reads
   //           it to reject VD-only tracks (75 with z, 77 without z, VFT-only
   //           from ISVER 107) and ID+VD-only tracks without z (72).
+  //   id word IQ(LPA+3) whole; `code` is its bits 19-25.
+  //   mass code  PA.MAIN Q(LMAIN+10), SKELANA's VECP(8), an integer code.
+  //   energy error  PA.MAIN Q(LMAIN+19), SKELANA's QTRAC(41) before any
+  //           refit, as stored (SKELANA defines no unset value for it).
   //   length  track length in cm, the one selection quantity that cannot be
   //           reconstructed from the other emitted collections.
-  // charge code, code, mask and length are PA words; a RecoveredNeutral
-  // entry repeats those of the PA it was built from.
+  // charge code, code, id word, mask, mass code, energy error and length are
+  // PA words; a RecoveredNeutral entry repeats those of the PA it was built
+  // from.
   auto push_particle_words = [&](int vecp_i, int lpa, int lmain,
                                  VecpStatus status, bool chargedPa) {
     // PSHSCT uses the beam spot when no usable primary vertex exists.
@@ -206,7 +251,10 @@ void TrackingWriter::emit()
     chargeCodeCol.push_back(static_cast<std::int32_t>(std::lround(ph::Q(lmain + 8))));
     vecpChargeCol.push_back(vecp_i >= 1 ? sk::VECP(7, vecp_i) : kNaN);
     codeCol.push_back((ph::IQ(lpa + 3) >> 18) & 0x7F);
+    idWordCol.push_back(ph::IQ(lpa + 3));
     detCol.push_back(ph::IQ(lpa + 2));
+    massCodeCol.push_back(static_cast<std::int32_t>(std::lround(ph::Q(lmain + 10))));
+    energyErrorCol.push_back(ph::Q(lmain + 19));
     lengthCol.push_back(ph::Q(lmain + 9));
   };
 
@@ -371,10 +419,10 @@ void TrackingWriter::emit()
     // match. Stored as int32 so bit 32 (REMCLU overlap) is preserved.
     push_particle_words(vecp_i, lpa, lmain, status, /*chargedPa=*/true);
 
-    // BS/PV-corrected impact parameters from sk::QTRAC(38..40, vecp_i).
-    // PSCTRA indexes by the charged-VECP ordinal which matches vecp_i
-    // when IFLODR=1 (charged-first ordering).
-    push_qtrac_or_nan(vecp_i);
+    // BS/PV-corrected impact parameters from sk::QTRAC(38..40, vecp_i), and
+    // the perigee words QTRAC(4..23). PSCTRA indexes by the charged-VECP
+    // ordinal which matches vecp_i when IFLODR=1 (charged-first ordering).
+    push_qtrac_or_nan(vecp_i, ltrac);
 
     // SKELANA's recovered neutral: its own entry, directly after the PA it
     // came from, and the one place its energy is counted (the source has
@@ -418,11 +466,18 @@ void TrackingWriter::emit()
   put(std::move(chargeCodeCol), "MAIN", "Particles_ChargeCode", Provenance::Transcribed);
   put(std::move(vecpChargeCol), "VECP", "Particles_Charge",     Provenance::Transcribed);
   put(std::move(codeCol),   "MAIN", "Particles_ReconstructionCode", Provenance::Transcribed);
+  put(std::move(idWordCol), "MAIN", "Particles_IdentificationWord", Provenance::Transcribed);
   put(std::move(detCol),    "MAIN", "Particles_DetectorMask",       Provenance::Transcribed);
+  put(std::move(massCodeCol),    "MAIN", "Particles_MassCode",      Provenance::Transcribed);
+  put(std::move(energyErrorCol), "MAIN", "Particles_EnergyError",   Provenance::Transcribed);
   put(std::move(lengthCol), "MAIN", "Particles_TrackLength",        Provenance::Transcribed);
   put(std::move(d0PvCol),   "QTRAC", "Tracks_d0PV", Provenance::Derived);
   put(std::move(z0PvCol),   "QTRAC", "Tracks_z0PV", Provenance::Derived);
   put(std::move(d0BsCol),   "QTRAC", "Tracks_d0BS", Provenance::Derived);
+  for (int w = 0; w < kPerigeeWords; ++w) {
+    put(std::move(perigeeCols[w]), "QTRAC", kPerigeeNames[w], Provenance::Derived);
+  }
+  put(std::move(refittedCol), "QTRAC", "Tracks_PerigeeRefitted", Provenance::Derived);
 
   // Hand off to downstream writers via the shared context.
   ctx_.tracking = std::move(result);

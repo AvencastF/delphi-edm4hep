@@ -7,7 +7,10 @@ real file, plus the RecDqdx -> Track relation, the primary-vertex flags and the
 MAIN VecpStatus contract (NaN exactly where no own VECP row exists, each
 recovered neutral directly after its one source, every shower owned by at most
 one particle, charge consistent with the raw charge code, VECP charge NaN
-exactly where no own VECP row exists). It
+exactly where no own VECP row exists, ReconstructionCode = bits 19-25 of the
+PA identification word, recovered neutrals repeating their source's PA words,
+SKELANA perigee words NaN exactly where no own VECP row exists and equal to
+the AtIP state wherever they are not marked refitted). It
 guards the bug class where a per-particle array is emitted alongside a track
 collection, so consumers read the wrong row. Value-level checks cannot see it,
 and it only shows on events with a reconstructed neutral (Particles > Tracks):
@@ -20,7 +23,9 @@ Usage:
 Exit 0 if all contracts hold, 77 if no input is configured (CTest skip), and
 1 if an explicitly configured input is missing or any contract fails.
 """
+import math
 import os
+import struct
 import sys
 
 # A companion array is index-aligned with an object collection. The array is
@@ -45,6 +50,43 @@ def parent_of(name, names):
     return None
 
 
+def same(a, b):
+    """Equal, NaN equal to NaN."""
+    return a == b or (a != a and b != b)
+
+
+def f32(x):
+    """x rounded to float32, as the converter computes it."""
+    return struct.unpack("f", struct.pack("f", x))[0]
+
+
+def perigee_violations(perigee, track, status):
+    """SKELANA perigee words of one track against its status and AtIP state."""
+    k = track.getObjectID().index
+    flag = int(perigee["Refitted"][k])
+    words = [float(v[k]) for n, v in perigee.items() if n != "Refitted"]
+    bad = []
+    if flag not in (-1, 0, 1) or (flag == -1) != (status in (1, 3)):
+        bad.append(f"PerigeeRefitted {flag} with status {status}")
+    if any(w != w for w in words) != (flag == -1) or \
+            all(w != w for w in words) != (flag == -1):
+        bad.append(f"perigee words NaN pattern wrong for PerigeeRefitted {flag}")
+    if flag == 0:
+        # Not refitted: the words are PA.TRAC, the source of the AtIP state
+        # (Helix::fromPerigee: D0 = -10 d0, Z0 = 10 z0, omega = 1/R / 10).
+        st = list(track.getTrackStates())[0]
+        g = {n: float(perigee[n][k]) for n in ("D0", "Z0", "Theta", "Phi", "InvR")}
+        want = (f32(-10 * g["D0"]), f32(10 * g["Z0"]), g["Phi"],
+                f32(g["InvR"] / 10), 1 / math.tan(g["Theta"]))
+        got = (st.D0, st.Z0, st.phi, st.omega, st.tanLambda)
+        tol = (1e-9, 1e-9, 1e-9, 1e-12, 1e-5)  # tanLambda: float cos/sin
+        if int(st.location) != 1 or not all(
+                math.isclose(a, b, rel_tol=1e-5, abs_tol=t)
+                for a, b, t in zip(want, got, tol)):
+            bad.append("unrefitted perigee words differ from the AtIP state")
+    return bad
+
+
 def vecp_status_violations(fr, names, prefix="sDST"):
     """VecpStatus contract violations in one frame, as a list of strings."""
     main, stat = f"{prefix}_MAIN_Particles", f"{prefix}_MAIN_Particles_VecpStatus"
@@ -60,6 +102,21 @@ def vecp_status_violations(fr, names, prefix="sDST"):
         cc, vc = fr.get(code), fr.get(vecq)
         if len(cc) != len(ps) or len(vc) != len(ps):
             cc = vc = None  # reported by the length check
+    # PA words and SKELANA perigee words, checked when present (absent before
+    # they were added) and when their lengths match (else the length check
+    # reports them).
+    pa = {w: fr.get(f"{main}_{w}") for w in
+          ("IdentificationWord", "MassCode", "EnergyError",
+           "ReconstructionCode") if f"{main}_{w}" in names}
+    if any(len(v) != len(ps) for v in pa.values()):
+        pa = {}
+    tracks = fr.get(f"{prefix}_TRAC_Tracks") \
+        if f"{prefix}_TRAC_Tracks" in names else []
+    stem = f"{prefix}_QTRAC_Tracks_Perigee"
+    perigee = {n[len(stem):]: fr.get(n) for n in names if n.startswith(stem)}
+    if "Refitted" not in perigee or \
+            any(len(v) != len(tracks) for v in perigee.values()):
+        perigee = {}
     bad = []
     owners = {}
     for i, p in enumerate(ps):
@@ -93,6 +150,14 @@ def vecp_status_violations(fr, names, prefix="sDST"):
                 bad.append(f"VECP charge {vq} with status {s}")
             if s == 2 and (vq != 0 or code == 0 or code != int(cc[i - 1])):
                 bad.append("recovered neutral VECP charge or code wrong")
+        if "IdentificationWord" in pa and "ReconstructionCode" in pa and \
+                (int(pa["IdentificationWord"][i]) >> 18) & 0x7F != \
+                int(pa["ReconstructionCode"][i]):
+            bad.append("ReconstructionCode is not IdentificationWord bits 19-25")
+        if s == 2 and any(not same(v[i], v[i - 1]) for v in pa.values()):
+            bad.append("recovered neutral PA words differ from its source")
+        if perigee and len(p.getTracks()) == 1:
+            bad.extend(perigee_violations(perigee, list(p.getTracks())[0], s))
         for c in p.getClusters():
             oid = c.getObjectID()
             key = (oid.collectionID, oid.index)

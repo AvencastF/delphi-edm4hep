@@ -17,7 +17,7 @@ with Path('event-weights.csv').open() as stream:
  weight_rows={int(r['hepmc_event']):r for r in csv.DictReader(stream)}
 expected_run=-int(json.loads(Path('task.json').read_text())['run'])
 observed_weights=[]
-reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0,charge_codes=collections.Counter(),vecp_charges=collections.Counter())
+reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0,charge_codes=collections.Counter(),vecp_charges=collections.Counter(),mass_codes=collections.Counter(),perigee_refitted=collections.Counter())
 for i,fr in enumerate(reader.get('events')):
  run=int(fr.get_parameter('sDST_EVT_runNumber')); evt=int(fr.get_parameter('sDST_EVT_eventNumber')); ids.append((run,evt))
  weight=float(fr.get_parameter('mc_gen_weight'))
@@ -34,7 +34,7 @@ for i,fr in enumerate(reader.get('events')):
   d['total']+=n; d['nonempty_events']+=bool(n); d['min']=min(d['min'],n); d['max']=max(d['max'],n)
  ps=fr.get('sDST_MAIN_Particles'); tr=fr.get('sDST_TRAC_Tracks'); mc=fr.get('sDST_LUJ_GenParticles'); links=fr.get('sDST_TBL_RecoToGen')
  flags=fr.get('sDST_VECP_Particles_SelectionFlag'); status=fr.get('sDST_MAIN_Particles_VecpStatus')
- codes=fr.get('sDST_MAIN_Particles_ChargeCode'); vecq=fr.get('sDST_VECP_Particles_Charge')
+ codes=fr.get('sDST_MAIN_Particles_ChargeCode'); vecq=fr.get('sDST_VECP_Particles_Charge'); masscodes=fr.get('sDST_MAIN_Particles_MassCode')
  for index,particle in enumerate(ps):
   # VecpStatus 1/3: charged PA without its own VECP row, NaN 4-vector; 2: SKELANA's recovered neutral.
   if status[index] in (1,3):
@@ -43,6 +43,10 @@ for i,fr in enumerate(reader.get('events')):
   reco_diagnostics['recovered_neutrals']+=int(status[index]==2)
   # Raw PA.MAIN charge code and SKELANA's VECP(7) (NaN without an own row), counted as published.
   reco_diagnostics['charge_codes'][int(codes[index])]+=1; reco_diagnostics['vecp_charges'][str(vecq[index])]+=1
+  # Raw PA.MAIN mass code; a recovered neutral repeats its source's, so it is counted once.
+  if status[index]!=2: reco_diagnostics['mass_codes'][int(masscodes[index])]+=1
+ # SKELANA perigee words: 1 refitted (differ from PA.TRAC), 0 equal, -1 no own VECP row.
+ for flag in fr.get('sDST_QTRAC_Tracks_PerigeeRefitted'): reco_diagnostics['perigee_refitted'][int(flag)]+=1
  charged=sum(p.getCharge()!=0 for p in ps)
  for index,p in enumerate(ps):
   v=p.getMomentum()

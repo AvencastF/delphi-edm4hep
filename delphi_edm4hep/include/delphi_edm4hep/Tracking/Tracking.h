@@ -12,6 +12,16 @@
 //                                    charge code (0/1/2/3)
 //   <prefix>_VECP_Particles_Charge         UserData<float>, SKELANA's VECP(7)
 //                                    of the entry's own row; NaN without one
+//   <prefix>_MAIN_Particles_IdentificationWord / _MassCode / _EnergyError
+//                                    raw PA words IQ(LPA+3) (int32), PA.MAIN
+//                                    word 10 (int32) and word 19 (float)
+//   <prefix>_QTRAC_Tracks_Perigee*   UserData<float>, QTRAC(4..23) raw
+//                                    (DELPHI units), parallel to TRAC_Tracks;
+//                                    NaN without an own VECP row
+//   <prefix>_QTRAC_Tracks_PerigeeRefitted
+//                                    UserData<int32>: 1 = QTRAC(4..23) differ
+//                                    from PA.TRAC (SKELANA refit), 0 = equal,
+//                                    -1 = no own VECP row
 //   <prefix>_QTRAC_Tracks_d0PV / _z0PV / _d0BS
 //                                    UserData<float> from QTRAC(38..40); mm
 //                                    (cm x10), DELPHI sign, parallel to

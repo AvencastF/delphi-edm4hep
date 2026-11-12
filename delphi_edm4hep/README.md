@@ -282,7 +282,9 @@ count beside a table-3 per-track flag.
 
 To apply a different table yourself, the inputs are all in the output:
 momentum and the impact parameters, plus `sDST_MAIN_Particles_TrackLength`
-(the only cut quantity with no other route) and
+(no other route), `sDST_MAIN_Particles_EnergyError`
+(the Δp/p cut; for a refitted track SKELANA cut on the refit's error, which
+follows from the `sDST_QTRAC_Tracks_Perigee*` weight matrix) and
 `sDST_MAIN_Particles_ReconstructionCode` (the word SKELANA reads to reject
 VD-only and ID+VD-without-z tracks).
 
@@ -333,6 +335,29 @@ VD-only and ID+VD-without-z tracks).
   NaN when the track has no own VECP row, when SKELANA left its −999 cm
   sentinel (no usable primary vertex, `KVTX(16,1) > 0`, or no TBDCAE result),
   and for `d0BS` when `BeamSpotErrorCode ≠ 0`. An exact 0 is a stored value.
+- `sDST_QTRAC_Tracks_Perigee*` (UserData&lt;float&gt;, 20 arrays) — SKELANA's
+  track parameters `QTRAC(4..23)`, raw, parallel to `sDST_TRAC_Tracks`.
+  Layout of PA.TRAC words 2..21, DELPHI units and signs, no conversion:
+  `PerigeeD0` (cm, DELPHI sign — the `AtIP` `D0` is −10× this), `PerigeeZ0`
+  (cm), `PerigeeTheta` (rad), `PerigeePhi` (rad), `PerigeeInvR` (1/R, 1/cm,
+  signed: the `AtIP` `omega` is this / 10), then the weight matrix (inverse
+  covariance) of those five in that order, `PerigeeWeightIJ` = element
+  (I, J), I ≥ J, in the matching inverse units. SKELANA copies PA.TRAC into
+  these words (`PSHTRA`), so they equal the `AtIP` state's source unless
+  SKELANA's primary-vertex-constrained refit (`PSHCTRECPBS`) replaced them.
+  With this converter's flags the refit is tried on VD-only tracks with z
+  (reconstruction code 75), on FCA+FCB-only tracks, and on tracks failing the
+  "excessive momentum" cut; it is kept only when the fit converges and passes
+  SKELANA's momentum and Δp/p checks. A kept refit also replaced the VECP
+  4-vector, `VECP(7)` and `QTRAC_Tracks_d0PV/z0PV/d0BS`. NaN without an own
+  VECP row (`VecpStatus` 1 or 3).
+- `sDST_QTRAC_Tracks_PerigeeRefitted` (UserData&lt;int32&gt;) — 1 when the
+  `Perigee*` words differ bit for bit from the track's PA.TRAC words, which in
+  SKELANA only the refit does; 0 when they are identical; −1 without an own
+  VECP row. Parallel to `sDST_TRAC_Tracks`. A refit that reproduced its input
+  exactly would read 0. SKELANA keeps no record of the refit itself (its
+  `LVSELE` recovery bit 21 is not published and covers only the
+  excessive-momentum path).
 - `sDST_VECP_Particles_SelectionFlag` (UserData&lt;int32&gt;) — raw per-particle DELPHI lock/status
   mask (`LVLOCK`); bit 1 marks track-selection failure and bit 32 multi-vertex/REMCLU
   locking. Other bits are preserved without reinterpretation. It has one
@@ -361,7 +386,8 @@ VD-only and ID+VD-without-z tracks).
   particle, and only the recovered neutral carries a finite 4-vector, so
   summing finite MAIN 4-vectors counts the recovered energy once. Its PA
   words (`ReconstructionCode`, `DetectorMask`, `TrackLength`) repeat those of
-  the source PA. SKELANA's record of which charged cut failed (`LVSELE`
+  the source PA; so do `ChargeCode`, `IdentificationWord`, `MassCode` and
+  `EnergyError`. SKELANA's record of which charged cut failed (`LVSELE`
   bits 2–11) is not published.
 
   > Earlier revisions (up to `d09cd51`) wrote 0 for the 4-momentum of status
@@ -394,6 +420,25 @@ VD-only and ID+VD-without-z tracks).
   > from 97E2 and 98C2 but common either side. DELPHI changed convention part
   > way through, keyed on `sDST_EVT_dstProcessingTag` (new from `96`) — use
   > that, not `sDST_EVT_dstVersion`, to decide how to read the code.
+- `sDST_MAIN_Particles_IdentificationWord` (UserData&lt;int32&gt;) — the
+  whole PA word `IQ(LPA+3)`, raw, parallel to `sDST_MAIN_Particles`;
+  `ReconstructionCode` is its bits 19–25 (DELPHI numbering, bit 1 = least
+  significant). What SKELANA reads from the other bits: 1–5 muon
+  identification (copied to `KMUID(1)`), 7–9 electron tag and 10–12 electron
+  veto (`KELID(1)`, `KELID(2)`), 13–15 and 16–18 the RICH kaon and proton
+  signatures plus one (`KHAID(4)`, `KHAID(5)`); bits 26–28 are compared with
+  the PA number by the REMCLU code. Bit 6 and bits 29–32 are not read by
+  SKELANA; their meaning is not documented here.
+- `sDST_MAIN_Particles_MassCode` (UserData&lt;int32&gt;) — PA.MAIN word 10,
+  the code SKELANA copies into `VECP(8)`, rounded to int (it is stored as an
+  integral real). Parallel to `sDST_MAIN_Particles`. SKELANA's only reading is
+  in `PSHEVT`: a neutral with 21 or 47 counts as electromagnetic energy, any
+  other nonzero value as hadronic. No other value is documented; `PDG` is not
+  set from it.
+- `sDST_MAIN_Particles_EnergyError` (UserData&lt;float&gt;) — PA.MAIN word
+  19, GeV, as stored. SKELANA uses it as the energy (momentum) error in its
+  Δp/p cut and copies it to `QTRAC(41)`; a refit replaces `QTRAC(41)` but not
+  this word. SKELANA defines no unset value for it, so none is mapped.
 - `sDST_MAIN_Particles_TrackLength` (UserData&lt;float&gt;) — track length in cm
   (PA.MAIN word 9, as stored), parallel to `sDST_MAIN_Particles`.
 - `sDST_MAIN_Particles_DetectorMask` (UserData&lt;int32&gt;) — which subdetectors were used
@@ -408,7 +453,9 @@ VD-only and ID+VD-without-z tracks).
   > "has VD hits" cut written against it silently widens.
 - `sDST_MAIN_Particles` (ReconstructedParticle) — charged and neutral
   particles. The 4-momentum and mass come from the SKELANA combined-momentum
-  vector (mass-hypothesis aware). `charge` = +1/−1 from the DELPHI charge code,
+  vector (mass-hypothesis aware); for a track SKELANA refitted
+  (`sDST_QTRAC_Tracks_PerigeeRefitted` = 1) that is the refit, while the
+  `sDST_TRAC_Tracks` `AtIP` state is the original PA.TRAC fit. `charge` = +1/−1 from the DELPHI charge code,
   0 for neutrals, NaN for a track whose charge code is "undefined" (3); the raw
   code and SKELANA's VECP charge are in `sDST_MAIN_Particles_ChargeCode` and
   `sDST_VECP_Particles_Charge`. Charged

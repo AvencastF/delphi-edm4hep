@@ -147,6 +147,19 @@ NaN. The raw code (`sDST_MAIN_Particles_ChargeCode`) and SKELANA's VECP(7)
 for such a code) are published beside it, so the converter makes no choice
 the analysis cannot undo.
 
+**SKELANA's track refit.** `PSHCTRECPBS` refits a track with the primary
+vertex constraint (VD-only with z, FCA+FCB-only, and excessive-momentum
+tracks with `IFLVDR = IFLFCT = 1`, `IFLRVR = 111`) and, when it keeps the
+refit, overwrites `QTRAC(4..23)`, `QTRAC(28)`, `QTRAC(38..41)`, the VECP 4-vector and
+`VECP(7)`; the PA banks are untouched. So `sDST_TRAC_Tracks` (from PA.TRAC)
+and `sDST_MAIN_Particles` (from VECP) can describe different fits of the
+same track. `QTRAC(4..23)` are published raw as `sDST_QTRAC_Tracks_Perigee*`
+with `sDST_QTRAC_Tracks_PerigeeRefitted` (words ≠ PA.TRAC), and the PA.MAIN
+words SKELANA reads beside them (`IQ(LPA+3)`, mass code, energy error) as
+`sDST_MAIN_Particles_IdentificationWord`, `_MassCode`, `_EnergyError`. New
+PA or PSC words follow the same rule: raw, in the companion array of the
+collection they describe, NaN where there is no source.
+
 The PSCVTX primary slot has its own per-event geometry sentinel. `Vertex.cpp`
 falls back to the raw ZEBRA chain (`LQ(LDTOP-1)`) whenever that slot is
 unavailable; this is an availability check, not a data-versus-MC classifier.

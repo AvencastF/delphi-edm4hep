@@ -3,7 +3,9 @@
 //   <tag>_EMNC_Showers   ECAL (HPC bit 0 / EMF bit 1 in Cluster.type)
 //   <tag>_HCNC_Showers   HCAL (bit 2), HACCOR-corrected
 //   <tag>_HCAL_Showers   HCAL (bit 2), as reconstructed
-// Sets Particle.clusters on each owner Particle via tracking.pa_to_particle.
+// Sets Particle.clusters on each owner Particle via
+// tracking.calorimeterOwner(paIdx): the PA's own Particle, or the
+// SKELANA-recovered neutral built from a charged PA's showers.
 
 #pragma once
 

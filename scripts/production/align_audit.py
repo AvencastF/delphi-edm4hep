@@ -3,7 +3,10 @@
 
 A companion UserData array is index-aligned with an object collection: row i
 describes element i of that collection. This scanner checks that contract on a
-real file, plus the RecDqdx -> Track relation and the primary-vertex flags. It
+real file, plus the RecDqdx -> Track relation, the primary-vertex flags and the
+MAIN VecpStatus contract (NaN exactly where no own VECP row exists, each
+recovered neutral directly after its one source, every shower owned by at most
+one particle). It
 guards the bug class where a per-particle array is emitted alongside a track
 collection, so consumers read the wrong row. Value-level checks cannot see it,
 and it only shows on events with a reconstructed neutral (Particles > Tracks):
@@ -41,6 +44,43 @@ def parent_of(name, names):
     return None
 
 
+def vecp_status_violations(fr, names, prefix="sDST"):
+    """VecpStatus contract violations in one frame, as a list of strings."""
+    main, stat = f"{prefix}_MAIN_Particles", f"{prefix}_MAIN_Particles_VecpStatus"
+    if main not in names or stat not in names:
+        return []
+    ps, st = fr.get(main), fr.get(stat)
+    if len(ps) != len(st):
+        return []  # reported by the length check
+    bad = []
+    owners = {}
+    for i, p in enumerate(ps):
+        s = int(st[i])
+        v = p.getMomentum()
+        finite = all(x == x for x in (v.x, v.y, v.z, p.getEnergy(), p.getMass()))
+        if s not in (0, 1, 2, 3):
+            bad.append(f"status {s} undefined")
+        if finite == (s in (1, 3)):
+            bad.append(f"status {s} with finite={finite}")
+        if s in (1, 3) and len(p.getTracks()) != 1:
+            bad.append(f"status {s} without its track")
+        if s == 1 and (i + 1 >= len(ps) or int(st[i + 1]) != 2):
+            bad.append("recovered source not followed by its neutral")
+        if s == 2:
+            src = [q.getObjectID().index for q in p.getParticles()]
+            if src != [i - 1] or int(st[i - 1]) != 1:
+                bad.append("recovered neutral not linked to the preceding source")
+            if p.getCharge() != 0 or len(p.getTracks()):
+                bad.append("recovered neutral carries charge or a track")
+        for c in p.getClusters():
+            oid = c.getObjectID()
+            key = (oid.collectionID, oid.index)
+            if key in owners:
+                bad.append("shower attached to two particles")
+            owners[key] = i
+    return bad
+
+
 def main():
     fn = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] \
         else os.environ.get("DELPHI_EDM4HEP_SAMPLE", "")
@@ -60,6 +100,7 @@ def main():
     unresolved = set()
     dq_missing = dq_total = nev = 0
     dummy_first = dummy_published_as_primary = dummy_chain_marked_primary = 0
+    status_fail = {}    # violation -> [event, ...]
     for i, fr in enumerate(reader.get("events")):
         nev += 1
         names = set(fr.getAvailableCollections())
@@ -86,6 +127,9 @@ def main():
                     dq_total += 1
                     if dq.getTrack().getObjectID().index < 0:
                         dq_missing += 1
+
+        for v in vecp_status_violations(fr, names):
+            status_fail.setdefault(v, []).append(i)
 
         status_name = "sDST_PV_Vertices_StatusBits"
         primary_name = "sDST_PV_PrimaryVertex"
@@ -121,6 +165,13 @@ def main():
         print(f"  FAIL  {dq_missing}/{dq_total} RecDqdx rows missing a Track link")
     elif dq_total:
         print(f"  OK    all {dq_total} RecDqdx rows carry a Track link")
+    if status_fail:
+        ok = False
+        for v, evs in sorted(status_fail.items()):
+            print(f"  FAIL  VecpStatus: {v} in {len(evs)}/{nev} events "
+                  f"(e.g. evt{evs[0]})")
+    else:
+        print("  OK    MAIN VecpStatus contract holds")
     if dummy_published_as_primary:
         ok = False
         print(f"  FAIL  {dummy_published_as_primary}/{dummy_first} events with "

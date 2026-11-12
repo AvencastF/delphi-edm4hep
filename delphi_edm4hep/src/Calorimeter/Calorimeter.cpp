@@ -220,8 +220,10 @@ void CalorimeterWriter::emit()
   if (ctx_.tracking) {
     const auto& tracking = *ctx_.tracking;
     pawalk::forEachPA([&](int lpa, int paIdx) {
-      if (paIdx >= static_cast<int>(tracking.pa_to_particle.size())) return;
-      const int particle_idx = tracking.pa_to_particle[paIdx];
+      // Usually the PA's own particle; for a charged PA that SKELANA
+      // recovered as a neutral, the recovered neutral made from these
+      // showers, so each shower stays attached to exactly one particle.
+      const int particle_idx = tracking.calorimeterOwner(paIdx);
       if (particle_idx < 0) return;
       auto pfo = tracking.particle_handles[particle_idx];
 

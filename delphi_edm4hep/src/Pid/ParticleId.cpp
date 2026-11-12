@@ -33,6 +33,7 @@
 #include <edm4hep/RecDqdxCollection.h>
 #include <podio/Frame.h>
 
+#include <cmath>
 #include <limits>
 #include <string>
 #include <vector>
@@ -51,6 +52,8 @@ float bbdxer_(float* dedxth, float* gap, int* nwir, int* nmeth, int* iqual);
 }
 
 namespace {
+
+constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
 
 // algorithmType constants for the four pass-1 PID flavours.
 constexpr std::int32_t kAlgoDedx     = 1;
@@ -194,16 +197,28 @@ void ParticleIdWriter::emit()
     }
 
     // ---- Muon ID (PSCMUD) ----
-    //   KMUID(1) = MUCAL2 tag (bits 1-5 for very-loose..tight..HCAL)
-    //   QMUID(2) = global chi2 of very-loose refit
-    //   KMUID(3) = hit pattern with inefficiencies
+    //   KMUID(1) = MUCAL2 tag (bits 1-5 for very-loose..tight..HCAL), copied
+    //              by PSHMUO from the PA header whether or not PA.MUID exists
+    //   QMUID(2) = global chi2 of very-loose refit   } filled by PSHMUO only
+    //   KMUID(3) = hit pattern with inefficiencies    } when the PA has a MUID
+    //                                                   module with bit 1 of
+    //                                                   its word 2 set
+    // A row is written when the tag is set or the PA carries a MUID module,
+    // so "module present, no tag" is no longer an absent row. Values PSHMUO
+    // did not fill are NaN; [3] is the raw module word 2 (NaN: no module).
     {
       const int tag = sk::KMUID(1, i);
-      if (tag != 0) {
+      const int lpa = sk::LVECP(i);
+      const int lmuid = lpa > 0 ? pawalk::lphpa("MUID", lpa) : 0;
+      if (tag != 0 || lmuid > 0) {
+        const float word2 = lmuid > 0 ? ph::Q(lmuid + 2) : kNaN;
+        const bool filled =
+            lmuid > 0 && (static_cast<int>(std::lround(word2)) & 1) != 0;
         auto pid = makePid(muonCol, i, kAlgoMuon);
         pid.addToParameters(static_cast<float>(tag));
-        pid.addToParameters(sk::QMUID(2, i));
-        pid.addToParameters(static_cast<float>(sk::KMUID(3, i)));
+        pid.addToParameters(filled ? sk::QMUID(2, i) : kNaN);
+        pid.addToParameters(filled ? static_cast<float>(sk::KMUID(3, i)) : kNaN);
+        pid.addToParameters(word2);
       }
     }
 

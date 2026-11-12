@@ -17,7 +17,7 @@ with Path('event-weights.csv').open() as stream:
  weight_rows={int(r['hepmc_event']):r for r in csv.DictReader(stream)}
 expected_run=-int(json.loads(Path('task.json').read_text())['run'])
 observed_weights=[]
-reco_diagnostics=dict(zero_momentum_charged=0,zero_momentum_selected_charged=0)
+reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0)
 for i,fr in enumerate(reader.get('events')):
  run=int(fr.get_parameter('sDST_EVT_runNumber')); evt=int(fr.get_parameter('sDST_EVT_eventNumber')); ids.append((run,evt))
  weight=float(fr.get_parameter('mc_gen_weight'))
@@ -33,16 +33,17 @@ for i,fr in enumerate(reader.get('events')):
   d=sizes.setdefault(name,dict(type=str(c.getTypeName()),total=0,nonempty_events=0,min=n,max=n))
   d['total']+=n; d['nonempty_events']+=bool(n); d['min']=min(d['min'],n); d['max']=max(d['max'],n)
  ps=fr.get('sDST_MAIN_Particles'); tr=fr.get('sDST_TRAC_Tracks'); mc=fr.get('sDST_LUJ_GenParticles'); links=fr.get('sDST_TBL_RecoToGen')
- flags=fr.get('sDST_VECP_Particles_SelectionFlag')
+ flags=fr.get('sDST_VECP_Particles_SelectionFlag'); status=fr.get('sDST_MAIN_Particles_VecpStatus')
  for index,particle in enumerate(ps):
-  momentum=particle.getMomentum()
-  if particle.getCharge()!=0 and momentum.x==0 and momentum.y==0 and momentum.z==0:
-   reco_diagnostics['zero_momentum_charged']+=1
-   reco_diagnostics['zero_momentum_selected_charged']+=int(flags[index]==0)
+  # VecpStatus 1/3: charged PA without its own VECP row, NaN 4-vector; 2: SKELANA's recovered neutral.
+  if status[index] in (1,3):
+   reco_diagnostics['no_own_row_charged']+=1
+   reco_diagnostics['no_own_row_selected_charged']+=int(flags[index]==0)
+  reco_diagnostics['recovered_neutrals']+=int(status[index]==2)
  charged=sum(p.getCharge()!=0 for p in ps)
- for p in ps:
+ for index,p in enumerate(ps):
   v=p.getMomentum()
-  if not all(math.isfinite(x) for x in (v.x,v.y,v.z,p.getEnergy())): errors.append(['reco_nonfinite',evt])
+  if all(math.isfinite(x) for x in (v.x,v.y,v.z,p.getEnergy())) == (status[index] in (1,3)): errors.append(['reco_nonfinite' if status[index] not in (1,3) else 'reco_missing_not_nan',evt])
   for t in p.getTracks():
    if not 0<=t.getObjectID().index<tr.size(): errors.append(['track_link',evt])
  physical=[]

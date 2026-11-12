@@ -13,6 +13,7 @@
 #include <TMatrixDSym.h>
 
 #include <cmath>
+#include <limits>
 
 namespace delphi_edm4hep {
 
@@ -128,7 +129,13 @@ Helix Helix::fromPerigee(float d0, float z0, float theta, float phi,
   TMatrixDSym C_dp(Wm);
   C_dp.Invert(&det);
   if (det == 0.0 || !std::isfinite(det)) {
-    h.hasCov_ = true;                    // zero cov, but a valid track
+    // A valid track whose weight matrix cannot be inverted: its helix
+    // covariance is unknown, so NaN rather than a zero (= perfect) error.
+    // The time row and column stay 0, as for every perigee helix.
+    for (int i = 0; i < 5; ++i)
+      for (int j = 0; j <= i; ++j)
+        h.cov_[covOffset(i, j)] = std::numeric_limits<float>::quiet_NaN();
+    h.hasCov_ = true;
     return h;
   }
   const TMatrixD J  = perigeeJacobian(theta);

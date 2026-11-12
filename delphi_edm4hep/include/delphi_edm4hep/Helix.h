@@ -67,7 +67,8 @@ class Helix {
   // DELPHI perigee at the IP (PA.TRAC / PA.ELTR):
   //   d0, z0 [cm], theta, phi [rad], invR [1/cm, signed].
   //   W = 15-element lower-tri weight matrix (= cov^-1); pass nullptr to
-  //   skip cov. valid() is false on degenerate sin(theta) ~ 0.
+  //   skip cov. valid() is false on degenerate sin(theta) ~ 0. A singular
+  //   W gives NaN in the 5x5 helix block of the covariance.
   static Helix fromPerigee(float d0, float z0, float theta, float phi,
                            float invR,
                            const std::array<float, 15>* W = nullptr);

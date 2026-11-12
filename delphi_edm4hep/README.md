@@ -243,7 +243,9 @@ Per-event scalars stored as podio Frame parameters:
   NaN beam-spot coordinates/uncertainties and `QTRAC_Tracks_d0BS`, an empty
   `BSP_BeamSpot`, and invalid/empty recalculated AABTAG output. Stored DST
   content remains available. Charged-particle `SelectionFlag` is -1 (unknown)
-  when SKELANA had to use the unavailable beam spot instead of a usable PV.
+  when SKELANA had to use the unavailable beam spot instead of a usable PV;
+  so is that of a recovered neutral (`VecpStatus` 2), whose charged-or-neutral
+  classification depended on the same cut.
   A zero position with status 0 still aborts: it can indicate an unopened database.
 - Magnetic field: `BField` (Tesla) and `BFieldGevPerCm` (the
   curvature-to-momentum conversion factor).
@@ -301,8 +303,11 @@ VD-only and ID+VD-without-z tracks).
   particle. An `AtIP` TrackState carries the perigee helix
   (`D0` = −ε with DELPHI→EDM4hep sign flip, `Z0`, `phi`, `omega`, `tanLambda`)
   with the 5×5 covariance obtained by inverting the DELPHI weight matrix and
-  rotating into helix parameters. `chi2`/`ndf` are the with-VD fit when
-  available, else the without-VD fit. `tracks` and `trackerHits` link to the
+  rotating into helix parameters. If the DELPHI weight matrix is singular the
+  5×5 helix block of the covariance is NaN (never zero, which would claim a
+  perfect measurement). `chi2`/`ndf` are the with-VD fit when available, else
+  the without-VD fit; when neither PA.MAIN fit word is usable `ndf = 0` and
+  `chi2` is NaN. `tracks` and `trackerHits` link to the
   track elements from the same PA; further TrackStates carry the
   extrapolations below.
 
@@ -323,14 +328,45 @@ VD-only and ID+VD-without-z tracks).
   > has an associated MU signal. Elsewhere it is zero.
 - `sDST_QTRAC_Tracks_d0PV`, `sDST_QTRAC_Tracks_z0PV`, `sDST_QTRAC_Tracks_d0BS` (UserData&lt;float&gt;) —
   impact parameters of each track w.r.t. the primary vertex (`d0PV`, `z0PV`)
-  and the beam spot (`d0BS`), mm; parallel to `sDST_TRAC_Tracks` (charged
-  only — neutrals have no entry), NaN when no PV/BS-corrected value is
-  available for that track.
+  and the beam spot (`d0BS`), mm, DELPHI sign; parallel to `sDST_TRAC_Tracks`
+  (charged only — neutrals have no entry). SKELANA fills them in data and MC.
+  NaN when the track has no own VECP row, when SKELANA left its −999 cm
+  sentinel (no usable primary vertex, `KVTX(16,1) > 0`, or no TBDCAE result),
+  and for `d0BS` when `BeamSpotErrorCode ≠ 0`. An exact 0 is a stored value.
 - `sDST_VECP_Particles_SelectionFlag` (UserData&lt;int32&gt;) — raw per-particle DELPHI lock/status
-  mask; bit 1 marks track-selection failure and bit 32 multi-vertex/REMCLU
-  locking. Other bits are preserved without reinterpretation. −1 marks a
-  particle with no VECP match; neutrals carry a real verdict, since they go
-  through selection too. Parallel to `sDST_MAIN_Particles`.
+  mask (`LVLOCK`); bit 1 marks track-selection failure and bit 32 multi-vertex/REMCLU
+  locking. Other bits are preserved without reinterpretation. It has one
+  meaning: SKELANA's verdict, or −1 when no usable verdict exists. The reason
+  for a −1 is in `sDST_MAIN_Particles_VecpStatus`: no own VECP row (status 1
+  or 3), or a verdict that relied on an unavailable beam spot (status 0 or 2,
+  `sDST_EVT_BeamSpotErrorCode ≠ 0`). Neutrals carry a real verdict, since they
+  go through selection too. Parallel to `sDST_MAIN_Particles`.
+- `sDST_MAIN_Particles_VecpStatus` (UserData&lt;int32&gt;) — how the entry
+  relates to SKELANA's VECP particle list. Parallel to `sDST_MAIN_Particles`.
+
+  | Value | Name | Entry | 4-momentum, mass | `SelectionFlag` |
+  |---|---|---|---|---|
+  | 0 | own row | a PA with its own VECP row (charged or neutral) | from that row | `LVLOCK` (−1 only for the beam-spot case) |
+  | 1 | recovered source | charged PA whose charged row SKELANA removed and re-entered as a neutral (calorimeter recovery, `PSHCTRECCAL`/`PSHCHREC`) | NaN | −1 |
+  | 2 | recovered neutral | that neutral: `charge = 0`, massless, energy = the sum of the PA's HPC, EMF, HCAL and STIC energies passing the neutral cuts, direction of the first such shower (beam-spot corrected) | from the recovered row | `LVLOCK` of that row |
+  | 3 | no row | charged PA with no VECP row at all | NaN | −1 |
+
+  A status-2 entry directly follows its status-1 source, and its `particles`
+  relation holds exactly that source. The source keeps the track and every
+  PA-keyed record (TRAX states, track elements, ELTR, the PA-level PID
+  extras, the PV outgoing-particle assignment); having no charged VECP row,
+  it has no VECP-keyed PID rows (dE/dx, MUID, ELID, HAID). The recovered
+  neutral owns the PA's EMNC/HCNC/HCAL showers and the records keyed by its
+  VECP row (STIC shower, π⁰ fit, any `TBL_RecoToGen` link). Each shower is attached to exactly one
+  particle, and only the recovered neutral carries a finite 4-vector, so
+  summing finite MAIN 4-vectors counts the recovered energy once. Its PA
+  words (`ReconstructionCode`, `DetectorMask`, `TrackLength`) repeat those of
+  the source PA. SKELANA's record of which charged cut failed (`LVSELE`
+  bits 2–11) is not published.
+
+  > Earlier revisions (up to `d09cd51`) wrote 0 for the 4-momentum of status
+  > 1 and 3 entries, did not emit the recovered neutral, and attached the
+  > showers to the source.
 - `sDST_MAIN_Particles_ReconstructionCode` (UserData&lt;int32&gt;) — raw PXPHOT code,
   parallel to `sDST_MAIN_Particles`.
 
@@ -343,8 +379,8 @@ VD-only and ID+VD-without-z tracks).
   > from 97E2 and 98C2 but common either side. DELPHI changed convention part
   > way through, keyed on `sDST_EVT_dstProcessingTag` (new from `96`) — use
   > that, not `sDST_EVT_dstVersion`, to decide how to read the code.
-- `sDST_MAIN_Particles_TrackLength` (UserData&lt;float&gt;) — track length in cm, parallel
-  to `sDST_MAIN_Particles`.
+- `sDST_MAIN_Particles_TrackLength` (UserData&lt;float&gt;) — track length in cm
+  (PA.MAIN word 9, as stored), parallel to `sDST_MAIN_Particles`.
 - `sDST_MAIN_Particles_DetectorMask` (UserData&lt;int32&gt;) — which subdetectors were used
   in this particle's reconstruction, a raw bit mask parallel to
   `sDST_MAIN_Particles`. Bits: 2 primary vertex in fit, 4 VD, 5 ID, 6 TPC,
@@ -357,9 +393,12 @@ VD-only and ID+VD-without-z tracks).
   > "has VD hits" cut written against it silently widens.
 - `sDST_MAIN_Particles` (ReconstructedParticle) — charged and neutral
   particles. The 4-momentum and mass come from the SKELANA combined-momentum
-  vector (mass-hypothesis aware). `charge` = +1/−1 from the DELPHI charge code;
-  the "undefined" code maps to 0. Charged particles link to their
-  `sDST_TRAC_Tracks` entry.
+  vector (mass-hypothesis aware). `charge` = +1/−1 from the DELPHI charge code,
+  0 for neutrals, NaN for a track whose charge code is "undefined" (3). Charged
+  particles link to their `sDST_TRAC_Tracks` entry. Momentum, energy and mass
+  are NaN for a charged PA without its own VECP row; check
+  `sDST_MAIN_Particles_VecpStatus`, and see there for SKELANA's recovered
+  neutrals, which are entries of their own.
 
 **Vertices**
 
@@ -486,7 +525,14 @@ VD-only and ID+VD-without-z tracks).
   > shortDST does not carry. From 1996 the per-hit VD signal-to-noise ratio is
   > available instead, in `eDep` on `sDST_TDVD_VDHits` / `_VDPoints`.
 - `sDST_MUID_MuonID` (algType 2) — `[0]` muon tag (MUCAL2: 1 very-loose …
-  4 tight, 5 HCAL), `[1]` global χ² of the very-loose refit, `[2]` hit pattern.
+  4 tight, 5 HCAL; from the PA header), `[1]` global χ² of the very-loose
+  refit, `[2]` hit pattern, `[3]` raw word 2 of the PA's MUID extra module.
+  A row exists when the tag is non-zero **or** the PA carries a MUID module,
+  so a tag of 0 with `[3]` finite means "module present, no tag passed". No
+  row: no tag and no module. `[1]`/`[2]` are NaN unless SKELANA filled them
+  (module present with bit 1 of word 2 set, `PSHMUO`); `[3]` is NaN without a
+  module. What the module's presence says about muon-chamber acceptance is
+  not established here; read word 2 against the DELPHI MUID documentation.
 - `sDST_ELID_ElectronID` (algType 3) — `[0]` electron tag (0 not run, 1 not-e,
   2 very-loose, 3 loose, 4 standard, 5 tight), `[1]` γ-conversion tag.
 - `sDST_PHOT_PhotonID` (algType 30) — up to seven raw PHOT words starting
@@ -600,7 +646,8 @@ VD-only and ID+VD-without-z tracks).
   particle matched to a fullDST PA, `0` charged particle with no fullDST
   counterpart (post-DST V0 daughter, photon-conversion daughter, or hadronic
   secondary that exists only in the shortDST), `−1` neutral particle (no
-  perigee match applies).
+  perigee match applies; charge exactly 0 — a NaN, i.e. undefined, charge
+  is a track and starts at `0`).
 - `fDST_TRAC_Tracks` (Track) — the shortDST track cloned with its `AtIP` state,
   plus the extrapolation states the fullDST carries: one `AtFirstHit` at the
   first measured point, `AtCalorimeter` at a calorimeter face, and `AtOther`

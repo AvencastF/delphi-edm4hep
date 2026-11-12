@@ -69,7 +69,8 @@ void MatchProvenanceWriter::emit()
   prov.resize(sdst_particles.size());
   for (std::size_t i = 0; i < sdst_particles.size(); ++i) {
     // -1 for neutral, 0 for charged-not-yet-matched. Charged that
-    // get matched below are flipped to +1.
+    // get matched below are flipped to +1. An undefined charge (code 3) is
+    // NaN on the particle and so starts at 0: it is a track, not a neutral.
     prov[i] = (sdst_particles[i].getCharge() == 0.f) ? -1 : 0;
   }
 

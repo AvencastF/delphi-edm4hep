@@ -4,6 +4,7 @@
 //   <prefix>_TRAC_Tracks    (Track + TrackState[AtIP] + 5x5 helix-basis cov)
 //   <prefix>_MAIN_Particles (charged + neutral; 4-mom from sk::VECP)
 //   <prefix>_VECP_Particles_SelectionFlag       (UserData int32)
+//   <prefix>_MAIN_Particles_VecpStatus          (UserData int32, VecpStatus)
 //   <prefix>_MAIN_Particles_ReconstructionCode  (UserData int32)
 //   <prefix>_MAIN_Particles_DetectorMask        (UserData int32)
 //
@@ -13,7 +14,7 @@
 //
 // No shape moments, no sigma calibration, no perigee-momentum fallback —
 // bank-truth values only (those custom operations are intentionally
-// dropped).
+// dropped). A value with no source is NaN, never 0.
 
 #include "delphi_edm4hep/Tracking/Tracking.h"
 
@@ -61,10 +62,11 @@ namespace {
 // definition.
 
 // Look up the SKELANA VECP index for a given PA's lpa, using the LVECP
-// back-link. The `want_charged` flag gates: a charged-track PA wants
-// VECP(7,*) != 0; a neutral PA wants VECP(7,*) == 0. (PSHCTRECOVER
-// can reclassify mid-PSCEVT; the gate defends against that.)
-// Returns 0 if no match.
+// back-link. The `want_charged` flag gates: a charged-track PA's own row
+// has VECP(7,*) != 0; a neutral row has VECP(7,*) == 0. A neutral row
+// whose LVECP is a charged PA is the one PSHCHREC re-enters after
+// calorimeter recovery (the only other source of extra neutral rows,
+// REMCLU, is off: IFLECL = 22). Returns 0 if no match.
 int find_vecp_index(int lpa, bool want_charged)
 {
   for (int i = sk::LVPART; i <= sk::NVECP; ++i) {
@@ -86,6 +88,7 @@ void TrackingWriter::emit()
   edm4hep::TrackCollection                 trkCol;
   edm4hep::ReconstructedParticleCollection pfoCol;
   podio::UserDataCollection<std::int32_t>  lvlockCol;
+  podio::UserDataCollection<std::int32_t>  statusCol;
   podio::UserDataCollection<std::int32_t>  codeCol;
   podio::UserDataCollection<std::int32_t>  detCol;
   podio::UserDataCollection<float>         lengthCol;
@@ -123,17 +126,22 @@ void TrackingWriter::emit()
   //
   // CONVENTION / FOOTGUN (QTRAC_Tracks_d0PV / _z0PV / _d0BS): sk::QTRAC values
   // converted cm -> **mm**, DELPHI sign (rho = Vx sinphi - Vy cosphi), parallel
-  // to TRAC_Tracks (charged-only). These are EMPTY (0 / -999) in real DATA --
-  // the SKELANA QTRAC common is only filled in MC. For a data-usable impact
-  // parameter use PV_Tracks_d0PV (Vertex.cpp): geometric, also **mm** but LCIO
-  // sign. Both are filled on MC, where d0 differs by a factor -1 while z0
-  // agrees -- do not mix them.
+  // to TRAC_Tracks (charged-only). PSHTRA fills them for data and MC alike.
+  // It pre-fills -999 cm and keeps it when there is no usable primary vertex
+  // (KVTX(16,1) > 0, for d0PV/z0PV) or TBDCAE gives no answer; that sentinel
+  // is published as NaN. For the geometric impact parameter use
+  // PV_Tracks_d0PV (Vertex.cpp): also **mm** but LCIO sign, so d0 differs by
+  // a factor -1 while z0 agrees -- do not mix them.
   static constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
+  auto qtrac_mm = [](int k, int vecp_i) {
+    const float cm = sk::QTRAC(k, vecp_i);
+    return cm == -999.f ? kNaN : cm * 10.f;  // cm -> mm
+  };
   auto push_qtrac_or_nan = [&](int vecp_i) {
     if (vecp_i >= 1) {
-      d0PvCol.push_back(sk::QTRAC(38, vecp_i) * 10.f);  // cm -> mm
-      z0PvCol.push_back(sk::QTRAC(39, vecp_i) * 10.f);  // cm -> mm
-      d0BsCol.push_back(sk::IERRBS == 0 ? sk::QTRAC(40, vecp_i) * 10.f : kNaN);  // cm -> mm
+      d0PvCol.push_back(qtrac_mm(38, vecp_i));
+      z0PvCol.push_back(qtrac_mm(39, vecp_i));
+      d0BsCol.push_back(sk::IERRBS == 0 ? qtrac_mm(40, vecp_i) : kNaN);
     } else {
       d0PvCol.push_back(kNaN);
       z0PvCol.push_back(kNaN);
@@ -151,30 +159,52 @@ void TrackingWriter::emit()
     }
   };
 
-  // Charged PAs whose VECP momentum lookup failed (emitted with zero
-  // 4-momentum). Logged once per event below so the degradation is loud.
-  int n_zero_mom_charged = 0;
+  // Charged PAs emitted without a 4-vector of their own (VecpStatus
+  // RecoveredSource or NoRow), and charged PAs that unexpectedly have both a
+  // charged and a neutral VECP row. Logged once per event below so the
+  // degradation is loud.
+  int n_recovered = 0;
+  int n_no_row = 0;
+  int n_dual_rows = 0;
 
   // Per-particle words running parallel to <tag>_MAIN_Particles.
   //
   //   LVLOCK  selection verdict; 0 = selected. Neutrals are selected too
   //           (PSHSNT, with the per-table calorimeter thresholds), so they
-  //           carry a real verdict rather than a sentinel.
+  //           carry a real verdict rather than a sentinel. -1 = no usable
+  //           verdict: no VECP row, or the verdict relied on an unavailable
+  //           beam spot. VecpStatus says which.
+  //   status  VecpStatus of the entry.
   //   code    PXPHOT reconstruction code, IQ(LPA+3) bits 19-25. SKELANA reads
   //           it to reject VD-only tracks (75 with z, 77 without z, VFT-only
   //           from ISVER 107) and ID+VD-only tracks without z (72).
   //   length  track length in cm, the one selection quantity that cannot be
   //           reconstructed from the other emitted collections.
-  auto push_particle_words = [&](int vecp_i, int lpa, int lmain) {
+  // code, mask and length are PA words; a RecoveredNeutral entry repeats
+  // those of the PA it was built from.
+  auto push_particle_words = [&](int vecp_i, int lpa, int lmain,
+                                 VecpStatus status, bool chargedPa) {
     // PSHSCT uses the beam spot when no usable primary vertex exists.
     // Preserve the particle, but do not publish that fallback as a valid cut.
+    // It also decided whether a charged PA was kept or recovered as neutral.
     const bool missingSelectionReference = sk::IERRBS != 0 &&
-        sk::KVTX(16, 1) > 0 && vecp_i >= 1 && sk::VECP(7, vecp_i) != 0.f;
+        sk::KVTX(16, 1) > 0 && chargedPa;
     lvlockCol.push_back(vecp_i >= 1 && !missingSelectionReference
                            ? sk::LVLOCK(vecp_i) : -1);
+    statusCol.push_back(static_cast<std::int32_t>(status));
     codeCol.push_back((ph::IQ(lpa + 3) >> 18) & 0x7F);
     detCol.push_back(ph::IQ(lpa + 2));
-    lengthCol.push_back(lmain > 0 ? ph::Q(lmain + 9) : 0.f);
+    lengthCol.push_back(ph::Q(lmain + 9));
+  };
+
+  // Particle built from VECP row vecp_i: 4-vector, mass and charge as stored.
+  auto vecp_particle = [&](int vecp_i, float charge) {
+    auto pfo = pfoCol.create();
+    pfo.setMomentum({sk::VECP(1, vecp_i), sk::VECP(2, vecp_i), sk::VECP(3, vecp_i)});
+    pfo.setEnergy(sk::VECP(4, vecp_i));
+    pfo.setMass  (sk::VECP(5, vecp_i));
+    pfo.setCharge(charge);
+    return pfo;
   };
 
   // AABTAG's impact parameters, keyed by the PA they belong to. Empty when
@@ -194,17 +224,11 @@ void TrackingWriter::emit()
       const int vecp_i = find_vecp_index(lpa, /*want_charged=*/false);
       if (vecp_i < 1) { mark_pa_skipped(paIdx); return; }
 
-      auto npfo = pfoCol.create();
-      npfo.setMomentum({sk::VECP(1, vecp_i),
-                        sk::VECP(2, vecp_i),
-                        sk::VECP(3, vecp_i)});
-      npfo.setEnergy(sk::VECP(4, vecp_i));
-      npfo.setMass  (sk::VECP(5, vecp_i));
-      npfo.setCharge(0.f);
-      record_particle(npfo, vecp_i, paIdx);
+      record_particle(vecp_particle(vecp_i, 0.f), vecp_i, paIdx);
       // d0PV/z0PV/d0BS are parallel to Tracks (charged-only) and so are not
       // pushed for neutrals; the per-particle words are.
-      push_particle_words(vecp_i, lpa, lmain);
+      push_particle_words(vecp_i, lpa, lmain, VecpStatus::OwnRow,
+                          /*chargedPa=*/false);
       return;
     }
 
@@ -267,7 +291,9 @@ void TrackingWriter::emit()
     }
 
     // chi2 / ndf from PA.MAIN. +26/+27 (with VD) preferred, fallback to
-    // +16/+17 (without VD). SKELANA sanitises ndf to [0, 1000].
+    // +16/+17 (without VD). SKELANA sanitises ndf to [0, 1000]. With
+    // neither fit available the track says so: ndf = 0 and chi2 = NaN.
+    trk.setChi2(kNotMeasured);
     float chi2_vd = ph::Q(lmain + 26);
     int   ndf_vd  = static_cast<int>(std::lround(ph::Q(lmain + 27)));
     if (ndf_vd < 0 || ndf_vd > 1000) ndf_vd = 0;
@@ -284,10 +310,11 @@ void TrackingWriter::emit()
       }
     }
 
-    // VECP-matched index: required for VECP 4-momentum, LVLOCK, and
-    // QTRAC reads. If no match, fall back to perigee-derived momentum
-    // (with pion mass) — same fallback the current converter uses.
+    // The PA's own charged VECP row: required for the 4-momentum, LVLOCK and
+    // QTRAC reads. Without one, the neutral row SKELANA re-entered for this
+    // PA (if any) is the calorimeter recovery. No perigee-momentum fallback.
     const int vecp_i = find_vecp_index(lpa, /*want_charged=*/true);
+    const int recovered_i = find_vecp_index(lpa, /*want_charged=*/false);
 
     // Vertex-Detector hits SKELANA assigned to this track, decoded by
     // VdHitsWriter and grouped by the same charged-track ordinal. Linked
@@ -301,50 +328,70 @@ void TrackingWriter::emit()
       }
     }
 
-    // Charge sign from PA.MAIN. Code 3 ("undefined") -> 0 (we preserve
-    // the ambiguity rather than mapping to +1 like the current code does).
-    int sign = 0;
-    if      (charge_code == 1) sign = +1;
-    else if (charge_code == 2) sign = -1;
-    // else: sign = 0 (undefined)
+    // Charge sign from PA.MAIN. Code 3 ("undefined") -> NaN: the track
+    // exists but its sign is unknown, which neither +-1 nor 0 can say.
+    float charge = kNotMeasured;
+    if      (charge_code == 1) charge = +1.f;
+    else if (charge_code == 2) charge = -1.f;
 
-    float px = 0.f, py = 0.f, pz = 0.f, E = 0.f, mass = 0.f;
+    VecpStatus status = VecpStatus::OwnRow;
+    auto pfo = vecp_i >= 1 ? vecp_particle(vecp_i, charge) : pfoCol.create();
     if (vecp_i >= 1) {
-      px   = sk::VECP(1, vecp_i);
-      py   = sk::VECP(2, vecp_i);
-      pz   = sk::VECP(3, vecp_i);
-      E    = sk::VECP(4, vecp_i);
-      mass = sk::VECP(5, vecp_i);
+      if (recovered_i >= 1) ++n_dual_rows;   // not produced by IFLODR=1
     } else {
-      // No VECP match -> this charged Particle keeps zero 4-momentum (the
-      // perigee-momentum fallback is intentionally not implemented; VECP is
-      // authoritative). Count it so the job degrades loudly (logged per event
-      // below) instead of silently emitting an unphysical zero-momentum track.
-      ++n_zero_mom_charged;
+      // No charged VECP row: the PA keeps its track, but it has no 4-vector
+      // of its own. NaN, never 0, which is a measurable value.
+      status = recovered_i >= 1 ? VecpStatus::RecoveredSource
+                                : VecpStatus::NoRow;
+      ++(recovered_i >= 1 ? n_recovered : n_no_row);
+      pfo.setMomentum({kNotMeasured, kNotMeasured, kNotMeasured});
+      pfo.setEnergy(kNotMeasured);
+      pfo.setMass(kNotMeasured);
+      pfo.setCharge(charge);
     }
-
-    auto pfo = pfoCol.create();
-    pfo.setMomentum({px, py, pz});
-    pfo.setEnergy(E);
-    pfo.setMass(mass);
-    pfo.setCharge(static_cast<float>(sign));
     pfo.addToTracks(trk);
     record_particle(pfo, vecp_i, paIdx);
 
     // LVLOCK: per-VECP track-quality bitmask. -1 sentinel if no VECP
     // match. Stored as int32 so bit 32 (REMCLU overlap) is preserved.
-    push_particle_words(vecp_i, lpa, lmain);
+    push_particle_words(vecp_i, lpa, lmain, status, /*chargedPa=*/true);
 
     // BS/PV-corrected impact parameters from sk::QTRAC(38..40, vecp_i).
     // PSCTRA indexes by the charged-VECP ordinal which matches vecp_i
     // when IFLODR=1 (charged-first ordering).
     push_qtrac_or_nan(vecp_i);
+
+    // SKELANA's recovered neutral: its own entry, directly after the PA it
+    // came from, and the one place its energy is counted (the source has
+    // NaN kinematics). It owns the PA's showers (CalorimeterWriter via
+    // calorimeterOwner) and the VECP-row links (truth, STIC, pi0); the
+    // source keeps the track and all PA-keyed track information.
+    if (status == VecpStatus::RecoveredSource) {
+      auto npfo = vecp_particle(recovered_i, 0.f);
+      npfo.addToParticles(pfo);
+      const int n_idx = static_cast<int>(result.particle_handles.size());
+      result.particle_handles.push_back(npfo);
+      result.vecp_to_particle[recovered_i] = n_idx;
+      if (paIdx >= static_cast<int>(result.pa_to_recovered_neutral.size())) {
+        result.pa_to_recovered_neutral.resize(
+            static_cast<std::size_t>(paIdx + 1), -1);
+      }
+      result.pa_to_recovered_neutral[paIdx] = n_idx;
+      push_particle_words(recovered_i, lpa, lmain,
+                          VecpStatus::RecoveredNeutral, /*chargedPa=*/true);
+    }
   });
 
-  if (n_zero_mom_charged > 0) {
-    std::cerr << "delphi_edm4hep::tracking: WARNING: " << n_zero_mom_charged
-              << " charged PFO(s) had no VECP momentum match and were emitted"
-              << " with zero 4-momentum in this event\n";
+  if (n_recovered + n_no_row + n_dual_rows > 0) {
+    std::cerr << "delphi_edm4hep::tracking: WARNING: charged PFO(s) without a"
+              << " charged VECP row in this event: " << n_recovered
+              << " recovered by SKELANA as neutral, " << n_no_row
+              << " with no row (NaN 4-momentum)";
+    if (n_dual_rows > 0) {
+      std::cerr << "; " << n_dual_rows << " with both a charged and a"
+                << " neutral row (neutral row not emitted)";
+    }
+    std::cerr << "\n";
   }
 
   // Push all collections into the Frame via the base class's put().
@@ -352,6 +399,7 @@ void TrackingWriter::emit()
   put(std::move(trkCol),    "TRAC", "Tracks", Provenance::Derived);
   put(std::move(pfoCol),    "MAIN", "Particles", Provenance::Derived);
   put(std::move(lvlockCol), "VECP", "Particles_SelectionFlag", Provenance::Derived);
+  put(std::move(statusCol), "MAIN", "Particles_VecpStatus",     Provenance::Derived);
   put(std::move(codeCol),   "MAIN", "Particles_ReconstructionCode", Provenance::Transcribed);
   put(std::move(detCol),    "MAIN", "Particles_DetectorMask",       Provenance::Transcribed);
   put(std::move(lengthCol), "MAIN", "Particles_TrackLength",        Provenance::Transcribed);

@@ -120,12 +120,23 @@ are therefore not safely concurrent in one directory.
 The harness dedups on `(run, evt)` in `on_user02`; without it every event is
 written three times.
 
-**MC vs data divergence is a recurring trap.** Some SKELANA track-impact
-commons (`QTRAC(38..40)`, emitted as `sDST_TRAC_d0PV/z0PV/d0BS`) can carry a
-`-999` sentinel, which is why `Vertex.cpp` *also* emits the geometric
-`sDST_PV_trackD0PV/trackZ0PV/trackImpactFlag`. Those two families use
-**opposite sign conventions** (DELPHI vs LCIO) — never mix them. Check for the
-sentinel before assuming a common is populated.
+**Sentinels are a recurring trap.** The SKELANA track-impact commons
+(`QTRAC(38..40)`, emitted as `sDST_QTRAC_Tracks_d0PV/z0PV/d0BS`) are filled in
+data and MC but carry a `-999` cm sentinel when there is no usable primary
+vertex; `Tracking.cpp` publishes it as NaN. `Vertex.cpp` *also* emits the
+geometric `sDST_PV_Tracks_d0PV/z0PV/ImpactFlag`. Those two families use
+**opposite sign conventions** (DELPHI vs LCIO) — never mix them. Check every
+common for its sentinel before assuming it is populated, and publish a value
+with no source as NaN (or an explicit status), never as 0.
+
+**Charged PAs without a charged VECP row.** With `IFLODR=1, IFLRVR=111`
+SKELANA removes the charged row of a track that fails selection but has
+enough calorimeter energy, and re-enters the same PA as a neutral row
+(`PSHCTRECCAL` → `PSHCHREC`, `LVECP` = the original LPA). `Tracking.cpp`
+emits the PA (track, NaN 4-vector) and the recovered neutral as two entries,
+recorded in `sDST_MAIN_Particles_VecpStatus`; `CalorimeterWriter` attaches
+the PA's showers to the neutral via `Output::calorimeterOwner`. A new writer
+keyed by PA must decide which of the two it describes.
 
 The PSCVTX primary slot has its own per-event geometry sentinel. `Vertex.cpp`
 falls back to the raw ZEBRA chain (`LQ(LDTOP-1)`) whenever that slot is

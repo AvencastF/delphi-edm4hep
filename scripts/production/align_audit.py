@@ -15,7 +15,8 @@ exactly there too, an unrefitted QTRAC energy error equal to PA.MAIN word 19
 and a refit's fit quality a probability >= 0.01, the LVSELE selection word -1
 exactly without an own row, SelectionFlag equal to its bits 1 and 32 on
 every row with an own VECP row, recovered neutrals included, and bit 20 on
-every recovered neutral). It also counts, for information, the recovered
+every recovered neutral) and the truth vertex contract (see
+truth_vertex_violations). It also counts, for information, the recovered
 neutrals whose own SKELANA work word the converter published in place of the
 library's copy of the event's last recovery (see recovered_word_corrections). It
 guards the bug class where a per-particle array is emitted alongside a track
@@ -209,6 +210,75 @@ def vecp_status_violations(fr, names, prefix="sDST"):
     return bad
 
 
+def truth_vertex_violations(fr, names, prefix="sDST"):
+    """Truth vertex contract violations in one frame, as a list of strings.
+
+    VertexStatus: 0 own DELSIM vertex, 1 the decay vertex of the nearest
+    ancestor with one (or the primary without such an ancestor), 2 no mother:
+    the primary, 3 NaN. EndpointStatus: 0 where the own-vertex descendants
+    start, 1 = vertex (no own vertex), 2 no daughters: NaN, 3 NaN. time is NaN.
+    """
+    gen = f"{prefix}_LUJ_GenParticles"
+    vs_name, es_name = f"{gen}_VertexStatus", f"{gen}_EndpointStatus"
+    if not {gen, vs_name, es_name} <= names:
+        return []
+    mc, vs, es = fr.get(gen), fr.get(vs_name), fr.get(es_name)
+    if len(vs) != len(mc) or len(es) != len(mc):
+        return []  # reported by the length check
+
+    def xyz(v):
+        return (v.x, v.y, v.z)
+
+    def nan(t):
+        return all(x != x for x in t)
+
+    def mother(i):
+        ps = list(mc[i].getParents())
+        return ps[0].getObjectID().index if ps else -1
+
+    def own_ancestor(i):
+        a, steps = mother(i), 0
+        while a >= 0 and int(vs[a]) != 0 and steps <= len(mc):
+            a, steps = mother(a), steps + 1
+        return a
+
+    primary = [xyz(mc[i].getVertex()) for i in range(len(mc)) if int(vs[i]) == 2]
+    bad = []
+    for i, p in enumerate(mc):
+        v, e, s, t = xyz(p.getVertex()), xyz(p.getEndpoint()), int(vs[i]), int(es[i])
+        if s not in (0, 1, 2, 3) or t not in (0, 1, 2, 3):
+            bad.append(f"truth status {s}/{t} undefined")
+            continue
+        if p.getTime() == p.getTime():
+            bad.append("truth time not NaN")
+        if nan(v) != (s == 3) or any(x != x for x in v) != (s == 3):
+            bad.append(f"truth vertex NaN pattern wrong for VertexStatus {s}")
+        if nan(e) != (t in (2, 3)) or any(x != x for x in e) != (t in (2, 3)):
+            bad.append(f"truth endpoint NaN pattern wrong for EndpointStatus {t}")
+        if (t == 2) != (len(p.getDaughters()) == 0):
+            bad.append(f"EndpointStatus {t} with {len(p.getDaughters())} daughters")
+        if (s == 2 and mother(i) >= 0) or (s == 1 and mother(i) < 0):
+            bad.append(f"VertexStatus {s} with mother index {mother(i)}")
+        if t == 1 and (s == 0 or e != v):
+            bad.append("zero-flight endpoint differs from vertex or has an own vertex")
+        if t == 0 and s != 0:
+            bad.append("decay endpoint on an entry without its own vertex")
+        if s == 1:
+            a = own_ancestor(i)
+            want = xyz(mc[a].getEndpoint()) if a >= 0 else (primary[0] if primary else None)
+            if want is None or want != v:
+                bad.append("inherited vertex differs from the ancestor's decay vertex / primary")
+        if s == 0:
+            a = own_ancestor(i)
+            if a >= 0 and xyz(mc[a].getEndpoint()) != v:
+                bad.append("own vertex differs from its own-vertex ancestor's endpoint")
+            if a == -1 and primary and v != primary[0]:
+                bad.append("own vertex without own-vertex ancestor is not the primary")
+    if len(set(primary)) > 1:
+        bad.append("parentless entries at different primaries")
+    return bad
+
+
 def recovered_word_corrections(fr, names, prefix="sDST"):
     """Counter of the converter's correction of SKELANA's PSHCHREC copy.
 
@@ -256,6 +326,8 @@ def main():
     dq_missing = dq_total = nev = 0
     dummy_first = dummy_published_as_primary = dummy_chain_marked_primary = 0
     status_fail = {}    # violation -> [event, ...]
+    truth_fail = {}     # violation -> [event, ...]
+    truth_checked = 0
     own_words = [0, 0, 0, 0]
     for i, fr in enumerate(reader.get("events")):
         nev += 1
@@ -286,6 +358,9 @@ def main():
 
         for v in vecp_status_violations(fr, names):
             status_fail.setdefault(v, []).append(i)
+        for v in truth_vertex_violations(fr, names):
+            truth_fail.setdefault(v, []).append(i)
+        truth_checked += "sDST_LUJ_GenParticles_VertexStatus" in names
         own_words = [a + b for a, b in
                      zip(own_words, recovered_word_corrections(fr, names))]
 
@@ -330,6 +405,14 @@ def main():
                   f"(e.g. evt{evs[0]})")
     else:
         print("  OK    MAIN VecpStatus contract holds")
+    if truth_fail:
+        ok = False
+        for v, evs in sorted(truth_fail.items()):
+            print(f"  FAIL  truth: {v} in {len(evs)}/{nev} events "
+                  f"(e.g. evt{evs[0]})")
+    elif truth_checked:
+        print(f"  OK    truth vertex/endpoint status contract holds "
+              f"({truth_checked} events)")
     print(f"  INFO  {own_words[1]}/{own_words[0]} recovered neutrals carry "
           "their own SKELANA selection word instead of the event's last "
           f"recovery's; SelectionFlag locked->unlocked {own_words[2]}, "

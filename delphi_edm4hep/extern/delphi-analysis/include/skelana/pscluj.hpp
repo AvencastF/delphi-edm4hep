@@ -26,6 +26,10 @@ namespace skelana
 *     VP(I,5) - proper lifetime of the particle, or 0.
 *
 */
+// The units above are the LUJETS convention. PSFLUJ/PSHLUJ fill VP(I,1..3)
+// with the DELSIM vertex-bank (PV) position in cm, and only for entries whose
+// SH has an ST bank (else 0 = no vertex); VP(I,4..5) are set to 0, unfilled
+// (skelana.car PSFLUJ/PSHLUJ). delphi_edm4hep Truth.cpp converts to mm.
     inline const int NPMAX = 4000;
     extern "C" struct
     {

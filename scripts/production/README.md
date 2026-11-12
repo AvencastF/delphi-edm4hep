@@ -29,9 +29,13 @@ collection-alignment audit plus the event/content audit inherited from the
 successful 1994 test. The orchestrator additionally requires exact requested
 counts, unique run/event IDs and FADGEN truth momentum correspondence.
 
-The audit does not certify all physics fields: known truth-vertex scale/origin,
-HPC energyError and VD coordinate issues remain visible and are not corrected by
-these operational scripts. Do not claim an empty collection is necessarily a
+The audit does not certify all physics fields: HPC energyError and VD
+coordinate issues remain visible and are not corrected by these operational
+scripts. The truth vertices are checked for their status contract
+(`align_audit.py`) and against the FADGEN vertices relative to the first entry
+(`audit_root.py`, `max_relative_vertex_difference_mm`); in 1992 that
+difference is large by construction, because DELSIM v92e re-draws decay
+lengths. Do not claim an empty collection is necessarily a
 converter failure. Detector mappings are unchanged; the converter now supports
 an optional production-weight input and metadata hook.
 

@@ -61,6 +61,11 @@ for i,fr in enumerate(reader.get('events')):
   for t in p.getTracks():
    if not 0<=t.getObjectID().index<tr.size(): errors.append(['track_link',evt])
  physical=[]
+ # DELSIM vertex/endpoint status per truth entry (align_audit checks the contract).
+ vstat=fr.get('sDST_LUJ_GenParticles_VertexStatus') if 'sDST_LUJ_GenParticles_VertexStatus' in names else []
+ estat=fr.get('sDST_LUJ_GenParticles_EndpointStatus') if 'sDST_LUJ_GenParticles_EndpointStatus' in names else []
+ for k in vstat: truthstats['vertex_status_%d'%k]+=1
+ for k in estat: truthstats['endpoint_status_%d'%k]+=1
  for p in mc:
   v=p.getMomentum()
   if not all(math.isfinite(x) for x in (v.x,v.y,v.z,p.getMass())): errors.append(['truth_nonfinite',evt])
@@ -71,6 +76,7 @@ for i,fr in enumerate(reader.get('events')):
    if any(abs(q.getPDG())==16 for q in p.getDaughters()):
     physical.append(p.getPDG()); truthstats['physical_tau_decays']+=1
     v=p.getVertex(); e=p.getEndpoint(); truthstats['physical_tau_nonzero_flight']+=sum((getattr(e,a)-getattr(v,a))**2 for a in ('x','y','z'))>1e-12
+    if len(estat)==mc.size(): truthstats['physical_tau_endpoint_status_%d'%estat[p.getObjectID().index]]+=1
  for l in links:
   if not (0<=l.getFrom().getObjectID().index<ps.size() and 0<=l.getTo().getObjectID().index<mc.size()): errors.append(['reco_truth_link',evt])
  # Only compare by slot where count and PDGs prove the original LU record order.

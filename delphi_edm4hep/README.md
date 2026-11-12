@@ -215,7 +215,8 @@ How each EDM4hep datatype is populated (units: mm, GeV, ns, rad throughout):
 - **TrackerHit3D** — `position` (mm), `cellID`, `type`, `eDep`.
 - **CalorimeterHit** — `energy`, `position` (mm), `type`, `cellID`, `time` (ns).
 - **MCParticle** — `PDG`, `generatorStatus`, `momentum`/`mass` (GeV),
-  `vertex` (production point, mm), `charge`, `parents`/`daughters`.
+  `vertex` (production point, mm), `endpoint` (decay point, mm), `time`
+  (NaN: not in the record), `charge`, `parents`/`daughters`.
 - **RecoMCParticleLink** — `from` (ReconstructedParticle) → `to` (MCParticle),
   with a `weight`.
 - **UserDataCollection&lt;T&gt;** — a flat array stored parallel (index-aligned)
@@ -294,8 +295,45 @@ in `sDST_VECP_Particles_SelectionWord`.
 **Truth**
 
 - `sDST_LUJ_GenParticles` (MCParticle) — the generator (LUND/JETSET) event
-  record: `PDG`, `generatorStatus`, momentum/mass (GeV), production vertex
-  (mm), charge, and parent links.
+  record as SKELANA `PSFLUJ` (fullDST) / `PSHLUJ` (shortDST) reads it from the
+  DELSIM SH/ST/PV structure: `PDG`, `generatorStatus`, momentum/mass (GeV),
+  charge, parent/daughter links, and the **DELSIM** vertices. `vertex` and
+  `endpoint` are in mm in the DELSIM (= reconstruction) frame, the primary at
+  the simulated beam spot. They are the vertices DELSIM tracked, not the
+  generator's: in 1992 (DELSIM v92e, no `LUDECV`) DELSIM re-draws every decay
+  length, 1993–95 copy the generator's. `time` is NaN (SKELANA reads none).
+  - Units: the PV words are cm (`PSFLUJ` copies `Q(LPV+5..7)` unconverted;
+    DELPHI's `SPATAU` divides their differences by c in cm/ps); the converter
+    multiplies by 10. Before `fix/truth-vertex-units-20261112` the cm values
+    were published as mm plus a per-event mm shift, so vertex differences were
+    10× too small.
+  - Only an entry whose SH has an ST bank has a vertex of its own. DELSIM
+    gives an ST to final-state particles and to particles it decays with a
+    lifetime (`SXSHST`/`SXSDK`); a generator-decayed particle without a LUND
+    lifetime (π⁰, ρ, the Z, documentation lines) has none, and DELSIM starts
+    its daughters at the decay vertex of the nearest ancestor with an ST, or
+    at the primary. The converter publishes exactly that placement and says
+    which rule applied:
+- `sDST_LUJ_GenParticles_VertexStatus` (UserData&lt;int32&gt;) — parallel to
+  `sDST_LUJ_GenParticles`.
+
+  | Value | `vertex` |
+  |---|---|
+  | 0 | its own DELSIM vertex (SH → ST → PV), ×10 |
+  | 1 | no ST: the decay vertex of its nearest ancestor with an ST (e.g. a π⁰ from τ decay sits at the τ decay vertex), or the primary when no ancestor has one |
+  | 2 | no ST and no mother: the simulated primary vertex |
+  | 3 | not determined: NaN |
+
+- `sDST_LUJ_GenParticles_EndpointStatus` (UserData&lt;int32&gt;) — parallel to
+  `sDST_LUJ_GenParticles`.
+
+  | Value | `endpoint` |
+  |---|---|
+  | 0 | the DELSIM decay vertex: where its descendants with an ST start, whose nearest ancestor with an ST it is (through daughters without an ST, so a τ → π⁰ ν decay has an endpoint) |
+  | 1 | no ST: decays where it is produced (`endpoint` = `vertex`) |
+  | 2 | no daughters in the record: NaN (DELSIM's own later decays and interactions, e.g. K⁰S, Λ, are not in this record) |
+  | 3 | daughters, but no descendant with an ST or descendants at different vertices: NaN |
+
 - `sDST_TBL_RecoToGen` (RecoMCParticleLink) — exact reconstructed→generated
   correspondence from the DELPHI association tables (not a geometric match);
   `from` = `sDST_MAIN_Particles`, `to` = `sDST_LUJ_GenParticles`.

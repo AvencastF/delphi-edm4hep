@@ -1,8 +1,9 @@
 // Truth domain — TruthGenWriter + TruthRecoLinkWriter.
 //
 // PSCLUJ (filled by PSHLUJ on sDST or PSFLUJ on fDST per bank-presence
-// gating) feeds TruthGenWriter. PSCTBL exact tables (IPAST then ISTLU)
-// feed TruthRecoLinkWriter, replacing the legacy helix-NN match.
+// gating) feeds TruthGenWriter, with the DELSIM vertex record converted from
+// cm to mm and a vertex/endpoint status per entry. PSCTBL exact tables (IPAST
+// then ISTLU) feed TruthRecoLinkWriter, replacing the legacy helix-NN match.
 
 #include "delphi_edm4hep/Truth/Truth.h"
 
@@ -13,9 +14,13 @@
 
 #include <edm4hep/MCParticleCollection.h>
 #include <edm4hep/RecoMCParticleLinkCollection.h>
+#include <podio/UserDataCollection.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -53,13 +58,70 @@ int unpack_lujets() {
   return sk::NP;
 }
 
+// The PSCLUJ vertex VP(i,1..3) is a DELSIM vertex-bank (PV) position in cm,
+// already in the DELSIM/reco frame (the primary sits at the simulated beam
+// spot). PSFLUJ copies Q(LPV+5..7) unconverted (skelana.car PSFLUJ, 7122-7132);
+// DELPHI's own dstana10 SPATAU divides differences of the same words by c in
+// cm/ps. The PSCLUJ header's "mm" is the LUJETS convention, not this record's.
+constexpr double kCm2Mm = 10.0;
+constexpr double kNaN   = std::numeric_limits<double>::quiet_NaN();
+
+// sDST_LUJ_GenParticles_VertexStatus / _EndpointStatus values.
+enum VertexStatus : std::int32_t {
+  kVtxOwn       = 0,   // its own DELSIM vertex (SH -> ST -> PV), VP x 10
+  kVtxInherited = 1,   // no ST: DELSIM's point for it, its mother's decay point
+  kVtxPrimary   = 2,   // no ST and no mother: the simulated primary vertex
+  kVtxUnknown   = 3,   // not determined: NaN
+};
+enum EndpointStatus : std::int32_t {
+  kEndDecay      = 0,  // the DELSIM decay vertex its own-vertex descendants start at
+  kEndZeroFlight = 1,  // no ST: DELSIM decays it where it is produced
+  kEndNone       = 2,  // no daughters in the record: NaN
+  kEndUnknown    = 3,  // daughters, but no consistent decay vertex: NaN
+};
+
+// Per LU index (0-based), whether PSFLUJ/PSHLUJ filled VP from a vertex bank
+// of the particle's own: fullDST, the SH has an ST whose PV exists (PSFLUJ
+// 7122-7132, walked in the same SH order); shortDST, the SH is one of the
+// SH-with-ST entries and its PV index is non-zero (PSHLUJ 5374-5398). For
+// every other entry SKELANA leaves VP as PSBEG zeroed it (skelana.car 629) or
+// sets it to 0 itself: "no vertex", not the origin. Gated as unpack_lujets().
+std::vector<char> own_sim_vertex(int nGen) {
+  std::vector<char> own(static_cast<std::size_t>(std::max(nGen, 0)), 0);
+  if (nGen <= 0 || ph::LDTOP <= 0) return own;
+  const bool short_sim = (ph::IQ(ph::LDTOP - 2) > 28)
+                      && (ph::LQ(ph::LDTOP - 28) != 0)
+                      && (ph::LQ(ph::LDTOP - 29) != 0);
+  if (short_sim) {
+    const int lstsh = ph::LQ(ph::LDTOP - 29);
+    if (lstsh <= 0) return own;
+    const int nsh0   = ph::IQ(lstsh + 2) / 1000;
+    const int nstsh  = ph::IQ(lstsh + 3) / 1000;
+    const int nst0   = ph::IQ(lstsh + 4) / 1000;
+    const int lenhed = ph::IQ(lstsh + 1) - (nsh0 + 2 * nstsh + nst0) + 1;
+    for (int i = 1; i <= nGen && i <= sk::NVMAX; ++i) {
+      const int j = sk::ILUSH(i);
+      if (j <= nsh0 || j > nsh0 + nstsh) continue;
+      const int word = ph::IQ(lstsh + lenhed + nsh0 + 2 * (j - nsh0));
+      own[static_cast<std::size_t>(i - 1)] = ((word >> 8) & 0xFF) != 0;  // JBYT(.,9,8)
+    }
+    return own;
+  }
+  int i = 0;
+  for (int lsh = ph::LQ(ph::LDTOP - 3); lsh > 0 && i < nGen; lsh = ph::LQ(lsh)) {
+    if (std::lround(ph::Q(lsh + 1)) == 0) continue;
+    const int lst = ph::LQ(lsh - 4);
+    own[static_cast<std::size_t>(i++)] = lst > 0 && ph::LQ(lst + 1) > 0;
+  }
+  return own;
+}
+
 // Per-event MC truth interaction point (sim-PV), in mm. Handles BOTH sim
 // layouts: shortDST (LPVS at LDTOP-28, first sim-PV x/y/z at Q(ip+4..6) cm) and
 // fullDST (LDTOP-3 -> LSH -> LST -> LPV, x/y/z at Q(lpv+5..7) cm); same decode
 // as delphi-raw-nanoaod fillSimPV. Returns nullopt when no sim banks are present
-// (real data / missing bank). Used to shift the gen-frame truth (primary at
-// ~origin) into the DELSIM/reco frame (event placed at the beamspot XYZP), so
-// MCParticle vertices/endpoints align with the reco PV.
+// (real data / missing bank). It is the production vertex of truth entries that
+// have neither a vertex of their own nor a mother (beams, Z/gamma*).
 std::optional<std::array<double, 3>> read_sim_pv_mm() {
   if (ph::LDTOP <= 0) return std::nullopt;
   // shortDST sim layout: LPVS at LDTOP-28, x/y/z at +4/+5/+6 (cm). Guard the
@@ -72,9 +134,9 @@ std::optional<std::array<double, 3>> read_sim_pv_mm() {
       const int npvs = ph::IQ(lpvs + 1);
       if (npvs >= 1) {
         const int ip = lpvs + 1 + npvs;
-        return std::array<double, 3>{ph::Q(ip + 4) * 10.0,   // cm -> mm
-                                     ph::Q(ip + 5) * 10.0,
-                                     ph::Q(ip + 6) * 10.0};
+        return std::array<double, 3>{ph::Q(ip + 4) * kCm2Mm,   // cm -> mm
+                                     ph::Q(ip + 5) * kCm2Mm,
+                                     ph::Q(ip + 6) * kCm2Mm};
       }
     }
   }
@@ -87,9 +149,9 @@ std::optional<std::array<double, 3>> read_sim_pv_mm() {
     if (lst <= 0) continue;
     const int lpv = ph::LQ(lst + 1);
     if (lpv <= 0) continue;
-    return std::array<double, 3>{ph::Q(lpv + 5) * 10.0,   // cm -> mm
-                                 ph::Q(lpv + 6) * 10.0,
-                                 ph::Q(lpv + 7) * 10.0};
+    return std::array<double, 3>{ph::Q(lpv + 5) * kCm2Mm,   // cm -> mm
+                                 ph::Q(lpv + 6) * kCm2Mm,
+                                 ph::Q(lpv + 7) * kCm2Mm};
   }
   return std::nullopt;
 }
@@ -101,72 +163,112 @@ void TruthGenWriter::emit() {
   GenParticleResult result;
 
   const int nGen = unpack_lujets();
+  const std::size_t n = static_cast<std::size_t>(std::max(nGen, 0));
   edm4hep::MCParticleCollection mc;
-  result.handles.reserve(static_cast<std::size_t>(nGen));
+  podio::UserDataCollection<std::int32_t> vertexStatusCol, endpointStatusCol;
+  result.handles.reserve(n);
 
-  // Per-event frame shift (mm): re-anchor the gen-frame truth onto the
-  // DELSIM/reco frame so MCParticle vertices/endpoints line up with the
-  // reconstructed PV. The gen primary is VP(1) (the LUJETS system/event
-  // vertex; ~origin unless Beams:allowVertexSpread baked a smear into VP);
-  // the sim primary is the sim-PV bank (shortDST LDTOP-28 or fullDST
-  // LDTOP-3->LSH->LST->LPV). shift = simPV - gen_primary preserves relative
-  // displacements (e.g. the B decay length) while moving the primary into the
-  // reco frame. Gated on nGen>=1 so real data (no LUJETS) never reads sim banks
-  // -> zero shift, empty truth.
-  double sx = 0.0, sy = 0.0, sz = 0.0;
-  if (nGen >= 1) {
-    if (auto spv = read_sim_pv_mm()) {
-      sx = (*spv)[0] - static_cast<double>(sk::VP(1, 1));
-      sy = (*spv)[1] - static_cast<double>(sk::VP(1, 2));
-      sz = (*spv)[2] - static_cast<double>(sk::VP(1, 3));
+  // Vertices and endpoints follow DELSIM's own placement (delsim36.car
+  // SXSHST/SXSDK): a particle with an ST bank starts at that ST's vertex; a
+  // decaying one (SXSDK) ends at a secondary vertex from which the STs of its
+  // final-state descendants hang -- including those reached through daughters
+  // without an ST (e.g. pi0 -> gamma gamma: LUND gives the pi0 no lifetime,
+  // so it has no ST and its photons start at the tau's decay vertex). A
+  // particle without an ST is therefore produced at its mother's decay point
+  // and decays where it is produced; with no mother either, it is at the
+  // simulated primary. Real data (nGen = 0) never reads sim banks -> empty
+  // truth.
+  using V3 = std::array<double, 3>;
+  const V3 nan3{kNaN, kNaN, kNaN};
+  const auto own = own_sim_vertex(nGen);
+  const auto spv = nGen >= 1 ? read_sim_pv_mm() : std::nullopt;
+  auto mother = [&](int i) {   // 0-based mother index, or -1
+    const int m = sk::KP(i + 1, 3);
+    return (m >= 1 && m <= nGen && m != i + 1) ? m - 1 : -1;
+  };
+  // Nearest own-vertex ancestor of i (0-based), or -1; at most n steps, so a
+  // malformed mother cycle cannot hang the walk.
+  auto own_ancestor = [&](int i) {
+    int a = mother(i);
+    for (int steps = 0; a >= 0 && !own[static_cast<std::size_t>(a)]; ++steps) {
+      if (steps > nGen) return -2;
+      a = mother(a);
+    }
+    return a;
+  };
+  std::vector<V3> vtx(n, nan3), end(n, nan3);
+  std::vector<std::int32_t> vstat(n, kVtxUnknown), estat(n, kEndNone);
+  std::vector<char> has_daughter(n, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    const int m = mother(static_cast<int>(i));
+    if (m >= 0) has_daughter[static_cast<std::size_t>(m)] = 1;
+    if (own[i]) {
+      const int lu = static_cast<int>(i) + 1;
+      vtx[i] = {sk::VP(lu, 1) * kCm2Mm, sk::VP(lu, 2) * kCm2Mm, sk::VP(lu, 3) * kCm2Mm};
+      vstat[i] = kVtxOwn;
+    }
+  }
+  // Decay vertex of each own-vertex particle: the start of every own-vertex
+  // descendant whose nearest own-vertex ancestor it is. They hang from one
+  // DELSIM vertex; any disagreement leaves the endpoint undetermined.
+  for (std::size_t d = 0; d < n; ++d) {
+    if (!own[d]) continue;
+    const int a = own_ancestor(static_cast<int>(d));
+    if (a < 0) continue;
+    const auto ai = static_cast<std::size_t>(a);
+    if (estat[ai] == kEndNone) { end[ai] = vtx[d]; estat[ai] = kEndDecay; }
+    else if (estat[ai] == kEndDecay && end[ai] != vtx[d]) { end[ai] = nan3; estat[ai] = kEndUnknown; }
+  }
+  for (std::size_t i = 0; i < n; ++i) {
+    if (own[i]) {
+      if (has_daughter[i] && estat[i] == kEndNone) estat[i] = kEndUnknown;  // NaN
+      continue;
+    }
+    // Production point of an entry without an ST: the decay vertex of its
+    // nearest own-vertex ancestor, else (no such ancestor) the primary.
+    const int a = own_ancestor(static_cast<int>(i));
+    if (a >= 0) {
+      vtx[i] = end[static_cast<std::size_t>(a)];
+      vstat[i] = std::isnan(vtx[i][0]) ? kVtxUnknown : kVtxInherited;
+    } else if (a == -1 && spv) {
+      vtx[i] = *spv;
+      vstat[i] = mother(static_cast<int>(i)) < 0 ? kVtxPrimary : kVtxInherited;
+    }
+    if (has_daughter[i]) {
+      end[i] = vtx[i];
+      estat[i] = vstat[i] == kVtxUnknown ? kEndUnknown : kEndZeroFlight;
     }
   }
 
-  // First pass: per-LU-index handle creation. KP(i,1)=status, KP(i,2)=PDG,
-  // PP(i,1..3)=p, PP(i,5)=mass, VP(i,1..3)=production vertex (mm per
-  // SKELANA A.2.5 — no unit conversion), frame-shifted by (sx,sy,sz).
-  for (int i = 1; i <= nGen; ++i) {
+  // KP(i,1)=status, KP(i,2)=PDG, PP(i,1..3)=p, PP(i,5)=mass (GeV). No time
+  // is read by SKELANA (VP(i,4) = 0, unfilled): published as NaN.
+  for (std::size_t i = 0; i < n; ++i) {
+    const int lu = static_cast<int>(i) + 1;
     auto mp = mc.create();
-    mp.setPDG(sk::KP(i, 2));
-    mp.setGeneratorStatus(static_cast<std::int16_t>(sk::KP(i, 1)));
-    mp.setMomentum({sk::PP(i, 1), sk::PP(i, 2), sk::PP(i, 3)});
-    mp.setMass(sk::PP(i, 5));
-    mp.setVertex({static_cast<double>(sk::VP(i, 1)) + sx,
-                  static_cast<double>(sk::VP(i, 2)) + sy,
-                  static_cast<double>(sk::VP(i, 3)) + sz});
-    mp.setCharge(charge_from_pdg(sk::KP(i, 2)));
+    mp.setPDG(sk::KP(lu, 2));
+    mp.setGeneratorStatus(static_cast<std::int16_t>(sk::KP(lu, 1)));
+    mp.setMomentum({sk::PP(lu, 1), sk::PP(lu, 2), sk::PP(lu, 3)});
+    mp.setMass(sk::PP(lu, 5));
+    mp.setVertex({vtx[i][0], vtx[i][1], vtx[i][2]});
+    mp.setEndpoint({end[i][0], end[i][1], end[i][2]});
+    mp.setTime(static_cast<float>(kNaN));
+    mp.setCharge(charge_from_pdg(sk::KP(lu, 2)));
+    vertexStatusCol.push_back(vstat[i]);
+    endpointStatusCol.push_back(estat[i]);
     result.handles.push_back(mp);
   }
 
-  // Second pass: parent/daughter graph (parent edges only; daughters
-  // are recoverable by reverse traversal).
-  // Endpoint (decay vertex): a decay's real daughters sit at the (possibly
-  // displaced) decay vertex, but LUJETS documentation-copy daughters (status 21)
-  // sit at the PARENT's production vertex. Pick the MOST-displaced daughter so a
-  // coincident doc-copy can't clobber a real displaced vertex -- the previous
-  // "last-daughter-wins" silently dropped ~40% of displaced B/D endpoints. A
-  // particle whose only daughters are coincident gets a zero-flight endpoint at
-  // its own vertex (correct); stable particles (no daughters) keep the default.
-  std::vector<double> best_disp2(static_cast<std::size_t>(nGen), -1.0);
-  for (int i = 1; i <= nGen; ++i) {
-    const int parent_lu = sk::KP(i, 3);
-    if (parent_lu >= 1 && parent_lu <= nGen) {
-      const std::size_t child = static_cast<std::size_t>(i - 1);
-      const std::size_t pidx  = static_cast<std::size_t>(parent_lu - 1);
-      result.handles[child].addToParents(result.handles[pidx]);
-      result.handles[pidx].addToDaughters(result.handles[child]);
-      const auto pv = result.handles[pidx].getVertex();
-      const auto cv = result.handles[child].getVertex();
-      const double dx = cv.x - pv.x, dy = cv.y - pv.y, dz = cv.z - pv.z;
-      const double d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 > best_disp2[pidx]) {
-        result.handles[pidx].setEndpoint(cv);
-        best_disp2[pidx] = d2;
-      }
-    }
+  // Parent/daughter graph.
+  for (std::size_t i = 0; i < n; ++i) {
+    const int m = mother(static_cast<int>(i));
+    if (m < 0) continue;
+    result.handles[i].addToParents(result.handles[static_cast<std::size_t>(m)]);
+    result.handles[static_cast<std::size_t>(m)].addToDaughters(result.handles[i]);
   }
 
   put(std::move(mc), "LUJ", "GenParticles", Provenance::Derived);
+  put(std::move(vertexStatusCol),   "LUJ", "GenParticles_VertexStatus",   Provenance::Derived);
+  put(std::move(endpointStatusCol), "LUJ", "GenParticles_EndpointStatus", Provenance::Derived);
   ctx_.gen_truth = std::move(result);
 }
 

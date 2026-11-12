@@ -141,6 +141,14 @@ row (`vecp_to_particle`: V0 and conversion legs, truth links, STIC, π⁰) land
 on the neutral by construction; the track is reached through its
 `particles[0]`.
 
+**Truth vertices are DELSIM's, in cm.** `PSFLUJ` fills `PSCLUJ` `VP` with
+the PV-bank position of the particle's ST (cm, DELSIM frame) and leaves 0
+where the SH has no ST. `TruthGenWriter` converts to mm and publishes, for
+entries without an ST, DELSIM's own placement (the nearest ST ancestor's decay
+vertex, or the primary), recording which in `_VertexStatus` and
+`_EndpointStatus`. The `PSCLUJ` header's "mm" is the LUJETS convention and
+does not apply.
+
 **Undefined charge code.** PA.MAIN charge code 3 is published as `charge`
 NaN. The raw code (`sDST_MAIN_Particles_ChargeCode`) and SKELANA's VECP(7)
 (`sDST_VECP_Particles_Charge`, NaN without an own row; `PSHVEC` writes 999

@@ -151,7 +151,7 @@ def vecp_status_violations(fr, names, prefix="sDST"):
             if s == 2 and (vq != 0 or code == 0 or code != int(cc[i - 1])):
                 bad.append("recovered neutral VECP charge or code wrong")
         if "IdentificationWord" in pa and "ReconstructionCode" in pa and \
-                (int(pa["IdentificationWord"][i]) >> 18) & 0x7F != \
+                (int(pa["IdentificationWord"][i]) >> 18 & 0x7F) != \
                 int(pa["ReconstructionCode"][i]):
             bad.append("ReconstructionCode is not IdentificationWord bits 19-25")
         if s == 2 and any(not same(v[i], v[i - 1]) for v in pa.values()):

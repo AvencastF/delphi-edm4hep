@@ -8,6 +8,10 @@
 //   <prefix>_VECP_Particles_SelectionFlag  UserData<int32>
 //   <prefix>_MAIN_Particles_VecpStatus     UserData<int32>, VecpStatus
 //                                    (TrackingData.h)
+//   <prefix>_MAIN_Particles_ChargeCode     UserData<int32>, raw PA.MAIN
+//                                    charge code (0/1/2/3)
+//   <prefix>_VECP_Particles_Charge         UserData<float>, SKELANA's VECP(7)
+//                                    of the entry's own row; NaN without one
 //   <prefix>_QTRAC_Tracks_d0PV / _z0PV / _d0BS
 //                                    UserData<float> from QTRAC(38..40); mm
 //                                    (cm x10), DELPHI sign, parallel to

@@ -367,6 +367,21 @@ VD-only and ID+VD-without-z tracks).
   > Earlier revisions (up to `d09cd51`) wrote 0 for the 4-momentum of status
   > 1 and 3 entries, did not emit the recovered neutral, and attached the
   > showers to the source.
+- `sDST_MAIN_Particles_ChargeCode` (UserData&lt;int32&gt;) — the PA.MAIN charge
+  code as stored (word 8): 0 neutral, 1 positive, 2 negative, 3 undefined.
+  Parallel to `sDST_MAIN_Particles`. It is a PA word, so a recovered neutral
+  (`VecpStatus` 2) repeats the code of its charged source. `charge` of
+  `sDST_MAIN_Particles` is derived from it (+1, −1, 0, NaN for 3).
+- `sDST_VECP_Particles_Charge` (UserData&lt;float&gt;) — `VECP(7)`, the charge
+  SKELANA stored in the entry's own VECP row, unchanged. Parallel to
+  `sDST_MAIN_Particles`. NaN where the entry has no VECP row of its own kind:
+  `VecpStatus` 1 and 3 (a charged PA without a charged row). A status-2
+  entry carries its neutral row's value, 0. SKELANA's `PSHVEC` writes +1/−1
+  for charge code 1/2, 0 for a neutral and 999 for any other charged code; its
+  beam-spot track refit (`PSHCTRECPBS`) rewrites the word from the charge
+  code of the refitted PA.MAIN copy (2 → −1). Values are published as
+  stored, with no reinterpretation: a code-3 track keeps `charge` NaN and
+  these two arrays let the analysis choose its own reading.
 - `sDST_MAIN_Particles_ReconstructionCode` (UserData&lt;int32&gt;) — raw PXPHOT code,
   parallel to `sDST_MAIN_Particles`.
 
@@ -394,7 +409,9 @@ VD-only and ID+VD-without-z tracks).
 - `sDST_MAIN_Particles` (ReconstructedParticle) — charged and neutral
   particles. The 4-momentum and mass come from the SKELANA combined-momentum
   vector (mass-hypothesis aware). `charge` = +1/−1 from the DELPHI charge code,
-  0 for neutrals, NaN for a track whose charge code is "undefined" (3). Charged
+  0 for neutrals, NaN for a track whose charge code is "undefined" (3); the raw
+  code and SKELANA's VECP charge are in `sDST_MAIN_Particles_ChargeCode` and
+  `sDST_VECP_Particles_Charge`. Charged
   particles link to their `sDST_TRAC_Tracks` entry. Momentum, energy and mass
   are NaN for a charged PA without its own VECP row; check
   `sDST_MAIN_Particles_VecpStatus`, and see there for SKELANA's recovered
@@ -427,6 +444,13 @@ VD-only and ID+VD-without-z tracks).
   weight matrix is in a non-standard basis.)
 - `sDST_PHC_PhotonConversions` (Vertex) — photon-conversion (γ→e⁺e⁻) vertices,
   e⁺/e⁻ in the `particles` relation.
+
+  > **A leg that SKELANA recovered as a neutral points at the recovered
+  > neutral.** SKELANA's V0 and conversion records refer to VECP rows, and
+  > such a leg's only row is the recovered neutral one, so the relation holds
+  > the `VecpStatus` 2 entry (charge 0, calorimeter 4-vector), not the track.
+  > The track is on its source: `particles[0]` of that entry, the `VecpStatus`
+  > 1 entry directly before it, whose `tracks` hold it.
 
 **Calorimeter showers**
 

@@ -6,7 +6,8 @@ describes element i of that collection. This scanner checks that contract on a
 real file, plus the RecDqdx -> Track relation, the primary-vertex flags and the
 MAIN VecpStatus contract (NaN exactly where no own VECP row exists, each
 recovered neutral directly after its one source, every shower owned by at most
-one particle). It
+one particle, charge consistent with the raw charge code, VECP charge NaN
+exactly where no own VECP row exists). It
 guards the bug class where a per-particle array is emitted alongside a track
 collection, so consumers read the wrong row. Value-level checks cannot see it,
 and it only shows on events with a reconstructed neutral (Particles > Tracks):
@@ -52,6 +53,13 @@ def vecp_status_violations(fr, names, prefix="sDST"):
     ps, st = fr.get(main), fr.get(stat)
     if len(ps) != len(st):
         return []  # reported by the length check
+    # Charge words, checked when present (absent before they were added).
+    code, vecq = f"{main}_ChargeCode", f"{prefix}_VECP_Particles_Charge"
+    cc = vc = None
+    if code in names and vecq in names:
+        cc, vc = fr.get(code), fr.get(vecq)
+        if len(cc) != len(ps) or len(vc) != len(ps):
+            cc = vc = None  # reported by the length check
     bad = []
     owners = {}
     for i, p in enumerate(ps):
@@ -72,6 +80,19 @@ def vecp_status_violations(fr, names, prefix="sDST"):
                 bad.append("recovered neutral not linked to the preceding source")
             if p.getCharge() != 0 or len(p.getTracks()):
                 bad.append("recovered neutral carries charge or a track")
+        if cc is not None:
+            code, vq, q = int(cc[i]), float(vc[i]), p.getCharge()
+            # charge derives from the raw code; a recovered neutral repeats
+            # its source's code but is neutral by construction.
+            want = 0.0 if s == 2 else {0: 0.0, 1: 1.0, 2: -1.0}.get(code)
+            if code not in (0, 1, 2, 3):
+                bad.append(f"charge code {code} undefined")
+            elif not (q == want or (want is None and q != q)):
+                bad.append(f"charge {q} inconsistent with charge code {code}")
+            if (vq != vq) != (s in (1, 3)):
+                bad.append(f"VECP charge {vq} with status {s}")
+            if s == 2 and (vq != 0 or code == 0 or code != int(cc[i - 1])):
+                bad.append("recovered neutral VECP charge or code wrong")
         for c in p.getClusters():
             oid = c.getObjectID()
             key = (oid.collectionID, oid.index)

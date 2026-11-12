@@ -136,7 +136,16 @@ enough calorimeter energy, and re-enters the same PA as a neutral row
 emits the PA (track, NaN 4-vector) and the recovered neutral as two entries,
 recorded in `sDST_MAIN_Particles_VecpStatus`; `CalorimeterWriter` attaches
 the PA's showers to the neutral via `Output::calorimeterOwner`. A new writer
-keyed by PA must decide which of the two it describes.
+keyed by PA must decide which of the two it describes. Writers keyed by VECP
+row (`vecp_to_particle`: V0 and conversion legs, truth links, STIC, π⁰) land
+on the neutral by construction; the track is reached through its
+`particles[0]`.
+
+**Undefined charge code.** PA.MAIN charge code 3 is published as `charge`
+NaN. The raw code (`sDST_MAIN_Particles_ChargeCode`) and SKELANA's VECP(7)
+(`sDST_VECP_Particles_Charge`, NaN without an own row; `PSHVEC` writes 999
+for such a code) are published beside it, so the converter makes no choice
+the analysis cannot undo.
 
 The PSCVTX primary slot has its own per-event geometry sentinel. `Vertex.cpp`
 falls back to the raw ZEBRA chain (`LQ(LDTOP-1)`) whenever that slot is

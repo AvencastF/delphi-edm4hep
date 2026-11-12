@@ -5,6 +5,8 @@
 //   <prefix>_MAIN_Particles (charged + neutral; 4-mom from sk::VECP)
 //   <prefix>_VECP_Particles_SelectionFlag       (UserData int32)
 //   <prefix>_MAIN_Particles_VecpStatus          (UserData int32, VecpStatus)
+//   <prefix>_MAIN_Particles_ChargeCode          (UserData int32, PA.MAIN charge code)
+//   <prefix>_VECP_Particles_Charge              (UserData float, VECP(7))
 //   <prefix>_MAIN_Particles_ReconstructionCode  (UserData int32)
 //   <prefix>_MAIN_Particles_DetectorMask        (UserData int32)
 //
@@ -89,6 +91,8 @@ void TrackingWriter::emit()
   edm4hep::ReconstructedParticleCollection pfoCol;
   podio::UserDataCollection<std::int32_t>  lvlockCol;
   podio::UserDataCollection<std::int32_t>  statusCol;
+  podio::UserDataCollection<std::int32_t>  chargeCodeCol;
+  podio::UserDataCollection<float>         vecpChargeCol;
   podio::UserDataCollection<std::int32_t>  codeCol;
   podio::UserDataCollection<std::int32_t>  detCol;
   podio::UserDataCollection<float>         lengthCol;
@@ -175,13 +179,20 @@ void TrackingWriter::emit()
   //           verdict: no VECP row, or the verdict relied on an unavailable
   //           beam spot. VecpStatus says which.
   //   status  VecpStatus of the entry.
+  //   charge code  PA.MAIN Q(LMAIN+8) as stored: 0 neutral, 1 positive,
+  //           2 negative, 3 undefined. The particle charge is derived from it.
+  //   VECP charge  VECP(7) of the entry's own row as SKELANA stored it, NaN
+  //           without one (VecpStatus 1 and 3). PSHVEC writes +1/-1 for code
+  //           1/2 and 999 for any other charged code; a beam-spot refit
+  //           (PSHCTRECPBS) rewrites it from the charge-code word of its
+  //           PA.MAIN copy passed through CONFPV (2 -> -1).
   //   code    PXPHOT reconstruction code, IQ(LPA+3) bits 19-25. SKELANA reads
   //           it to reject VD-only tracks (75 with z, 77 without z, VFT-only
   //           from ISVER 107) and ID+VD-only tracks without z (72).
   //   length  track length in cm, the one selection quantity that cannot be
   //           reconstructed from the other emitted collections.
-  // code, mask and length are PA words; a RecoveredNeutral entry repeats
-  // those of the PA it was built from.
+  // charge code, code, mask and length are PA words; a RecoveredNeutral
+  // entry repeats those of the PA it was built from.
   auto push_particle_words = [&](int vecp_i, int lpa, int lmain,
                                  VecpStatus status, bool chargedPa) {
     // PSHSCT uses the beam spot when no usable primary vertex exists.
@@ -192,6 +203,8 @@ void TrackingWriter::emit()
     lvlockCol.push_back(vecp_i >= 1 && !missingSelectionReference
                            ? sk::LVLOCK(vecp_i) : -1);
     statusCol.push_back(static_cast<std::int32_t>(status));
+    chargeCodeCol.push_back(static_cast<std::int32_t>(std::lround(ph::Q(lmain + 8))));
+    vecpChargeCol.push_back(vecp_i >= 1 ? sk::VECP(7, vecp_i) : kNaN);
     codeCol.push_back((ph::IQ(lpa + 3) >> 18) & 0x7F);
     detCol.push_back(ph::IQ(lpa + 2));
     lengthCol.push_back(ph::Q(lmain + 9));
@@ -329,7 +342,9 @@ void TrackingWriter::emit()
     }
 
     // Charge sign from PA.MAIN. Code 3 ("undefined") -> NaN: the track
-    // exists but its sign is unknown, which neither +-1 nor 0 can say.
+    // exists but its sign is unknown, which neither +-1 nor 0 can say. The
+    // raw code and SKELANA's VECP(7) ride alongside (push_particle_words),
+    // so a consumer can choose its own reading.
     float charge = kNotMeasured;
     if      (charge_code == 1) charge = +1.f;
     else if (charge_code == 2) charge = -1.f;
@@ -400,6 +415,8 @@ void TrackingWriter::emit()
   put(std::move(pfoCol),    "MAIN", "Particles", Provenance::Derived);
   put(std::move(lvlockCol), "VECP", "Particles_SelectionFlag", Provenance::Derived);
   put(std::move(statusCol), "MAIN", "Particles_VecpStatus",     Provenance::Derived);
+  put(std::move(chargeCodeCol), "MAIN", "Particles_ChargeCode", Provenance::Transcribed);
+  put(std::move(vecpChargeCol), "VECP", "Particles_Charge",     Provenance::Transcribed);
   put(std::move(codeCol),   "MAIN", "Particles_ReconstructionCode", Provenance::Transcribed);
   put(std::move(detCol),    "MAIN", "Particles_DetectorMask",       Provenance::Transcribed);
   put(std::move(lengthCol), "MAIN", "Particles_TrackLength",        Provenance::Transcribed);

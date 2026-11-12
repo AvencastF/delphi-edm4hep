@@ -16,7 +16,8 @@ common blocks we never read, and everything else in delphi-nanoaod
 (nanoaod writers, python, scripts) are intentionally not vendored.
 
 `skelana/trackntp.hpp` (the `TRKINF` common, SKELANA's per-track selection
-word `LVSELE`, from the `TRACKNTP` keep in `stdcdes.car`) has no upstream
+word `LVSELE`, and the `RECOVER` counter `INREC`, from the `TRACKNTP` keep in
+`stdcdes.car`, plus `LVWORK` from keep `PSCVECJJ`) has no upstream
 counterpart: it was written here, in the same style, and a re-copy must keep it.
 
 ## Updating

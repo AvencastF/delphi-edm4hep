@@ -12,12 +12,13 @@ with fadgen.open('rb') as f:
   fad.append([struct.unpack_from('<5i10f',b,4+60*i) for i in range(n)])
 reader=root_io.Reader(str(rootfile)); sizes={}; ids=[]; errors=[]; eventrows=[]; truthstats=collections.Counter(); ecs=collections.Counter(); tags=collections.Counter(); max_pdiff=0.; max_vdiff=0.; comparable=0
 from prepare_weights import prepare
+from align_audit import recovered_word_corrections
 prepare(Path.cwd())  # independently revalidate the production inputs
 with Path('event-weights.csv').open() as stream:
  weight_rows={int(r['hepmc_event']):r for r in csv.DictReader(stream)}
 expected_run=-int(json.loads(Path('task.json').read_text())['run'])
 observed_weights=[]
-reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0,charge_codes=collections.Counter(),vecp_charges=collections.Counter(),mass_codes=collections.Counter(),perigee_refitted=collections.Counter(),selection_bits=collections.Counter())
+reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0,charge_codes=collections.Counter(),vecp_charges=collections.Counter(),mass_codes=collections.Counter(),perigee_refitted=collections.Counter(),selection_bits=collections.Counter(),recovered_own_words=collections.Counter())
 for i,fr in enumerate(reader.get('events')):
  run=int(fr.get_parameter('sDST_EVT_runNumber')); evt=int(fr.get_parameter('sDST_EVT_eventNumber')); ids.append((run,evt))
  weight=float(fr.get_parameter('mc_gen_weight'))
@@ -51,6 +52,8 @@ for i,fr in enumerate(reader.get('events')):
  for word,s in zip(fr.get('sDST_VECP_Particles_SelectionWord'),status):
   word=int(word)&0xFFFFFFFF
   for bit in ([0] if word==0xFFFFFFFF else [b+1 for b in range(32) if word>>b&1]): reco_diagnostics['selection_bits']['status%d_bit%d'%(s,bit)]+=1
+ # Recovered neutrals given their own work word instead of the library's copy of the last recovery's (align_audit).
+ for key,n in zip(('status2_rows','word_corrected','flag_locked_to_unlocked','flag_unlocked_to_locked'),recovered_word_corrections(fr,names)): reco_diagnostics['recovered_own_words'][key]+=n
  charged=sum(p.getCharge()!=0 for p in ps)
  for index,p in enumerate(ps):
   v=p.getMomentum()

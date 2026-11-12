@@ -13,8 +13,11 @@ SKELANA perigee words NaN exactly where no own VECP row exists and equal to
 the AtIP state wherever they are not marked refitted, the QTRAC fit words NaN
 exactly there too, an unrefitted QTRAC energy error equal to PA.MAIN word 19
 and a refit's fit quality a probability >= 0.01, the LVSELE selection word -1
-exactly without an own row, SelectionFlag equal to its bits 1 and 32, and bit
-20 on every recovered neutral). It
+exactly without an own row, SelectionFlag equal to its bits 1 and 32 on
+every row with an own VECP row, recovered neutrals included, and bit 20 on
+every recovered neutral). It also counts, for information, the recovered
+neutrals whose own SKELANA work word the converter published in place of the
+library's copy of the event's last recovery (see recovered_word_corrections). It
 guards the bug class where a per-particle array is emitted alongside a track
 collection, so consumers read the wrong row. Value-level checks cannot see it,
 and it only shows on events with a reconstructed neutral (Particles > Tracks):
@@ -206,6 +209,33 @@ def vecp_status_violations(fr, names, prefix="sDST"):
     return bad
 
 
+def recovered_word_corrections(fr, names, prefix="sDST"):
+    """Counter of the converter's correction of SKELANA's PSHCHREC copy.
+
+    With IFLODR = 1 SKELANA gives every recovered neutral (VecpStatus 2) of an
+    event the selection word and LVLOCK of the event's last recovery; the
+    converter publishes each recovery's own work word instead. Recoveries
+    happen in PV->PA order, the order of MAIN, so the last status-2 entry of
+    the event holds what the library published for all of them. Returns
+    (status-2 rows, rows whose word differs from it, flags changed from
+    locked to unlocked, flags changed from unlocked to locked); "locked"
+    means SelectionFlag != 0.
+    """
+    stat = f"{prefix}_MAIN_Particles_VecpStatus"
+    word, flag = (f"{prefix}_VECP_Particles_Selection{w}" for w in ("Word", "Flag"))
+    if not {stat, word, flag} <= names:
+        return (0, 0, 0, 0)
+    st, sw, sf = fr.get(stat), fr.get(word), fr.get(flag)
+    rec = [i for i in range(len(st)) if int(st[i]) == 2]
+    if not rec or len(sw) != len(st) or len(sf) != len(st):
+        return (len(rec), 0, 0, 0)
+    lib_word, lib_flag = int(sw[rec[-1]]), int(sf[rec[-1]])
+    changed = [i for i in rec if int(sw[i]) != lib_word]
+    to_unlocked = sum(lib_flag != 0 and int(sf[i]) == 0 for i in rec)
+    to_locked = sum(lib_flag == 0 and int(sf[i]) != 0 for i in rec)
+    return (len(rec), len(changed), to_unlocked, to_locked)
+
+
 def main():
     fn = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] \
         else os.environ.get("DELPHI_EDM4HEP_SAMPLE", "")
@@ -226,6 +256,7 @@ def main():
     dq_missing = dq_total = nev = 0
     dummy_first = dummy_published_as_primary = dummy_chain_marked_primary = 0
     status_fail = {}    # violation -> [event, ...]
+    own_words = [0, 0, 0, 0]
     for i, fr in enumerate(reader.get("events")):
         nev += 1
         names = set(fr.getAvailableCollections())
@@ -255,6 +286,8 @@ def main():
 
         for v in vecp_status_violations(fr, names):
             status_fail.setdefault(v, []).append(i)
+        own_words = [a + b for a, b in
+                     zip(own_words, recovered_word_corrections(fr, names))]
 
         status_name = "sDST_PV_Vertices_StatusBits"
         primary_name = "sDST_PV_PrimaryVertex"
@@ -297,6 +330,10 @@ def main():
                   f"(e.g. evt{evs[0]})")
     else:
         print("  OK    MAIN VecpStatus contract holds")
+    print(f"  INFO  {own_words[1]}/{own_words[0]} recovered neutrals carry "
+          "their own SKELANA selection word instead of the event's last "
+          f"recovery's; SelectionFlag locked->unlocked {own_words[2]}, "
+          f"unlocked->locked {own_words[3]}")
     if dummy_published_as_primary:
         ok = False
         print(f"  FAIL  {dummy_published_as_primary}/{dummy_first} events with "

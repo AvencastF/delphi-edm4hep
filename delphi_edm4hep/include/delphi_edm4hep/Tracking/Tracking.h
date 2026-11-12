@@ -8,7 +8,8 @@
 //   <prefix>_VECP_Particles_SelectionFlag  UserData<int32>
 //   <prefix>_VECP_Particles_SelectionWord  UserData<int32>, SKELANA's LVSELE
 //                                    of the entry's own row, raw; -1 without
-//                                    one
+//                                    one; a recovered neutral gets its own
+//                                    recovery's work word (Tracking.cpp)
 //   <prefix>_MAIN_Particles_VecpStatus     UserData<int32>, VecpStatus
 //                                    (TrackingData.h)
 //   <prefix>_MAIN_Particles_ChargeCode     UserData<int32>, raw PA.MAIN

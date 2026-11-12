@@ -31,6 +31,7 @@
 #include "delphi_edm4hep/internal/AabtagTrackState.h"
 
 #include "skelana/pscbsp.hpp"
+#include "skelana/pscflg.hpp"
 
 #include "delphi_edm4hep/Helix.h"
 #include "delphi_edm4hep/internal/PaWalk.h"
@@ -237,9 +238,7 @@ void TrackingWriter::emit()
   //           are the ones copied into LVLOCK; 2-11 the failed cuts (ICTFAIL
   //           or INTFAIL shifted up by one), 20-22 the recovery step. -1
   //           without an own VECP row (no real word has every bit set).
-  //           With IFLODR = 1, PSHCHREC gives every recovered neutral of an
-  //           event the work word of the last track recovered (LVWORK+INREC);
-  //           published as SKELANA left it.
+  //           Recovered neutrals: see recovery_slot below.
   //   status  VecpStatus of the entry.
   //   charge code  PA.MAIN Q(LMAIN+8) as stored: 0 neutral, 1 positive,
   //           2 negative, 3 undefined. The particle charge is derived from it.
@@ -260,6 +259,36 @@ void TrackingWriter::emit()
   // charge code, code, id word, mask, mass code, energy error and length are
   // PA words; a RecoveredNeutral entry repeats those of the PA it was built
   // from.
+  //
+  // Converter-side correction of a SKELANA ordering bug (PSHCHREC). Each
+  // charged track recovered as a neutral gets its own work word: the k-th
+  // recovery (PSHCTRECCAL, charged pass, PV->PA order) fills
+  // LVSELE(LVWORK+k) and LVLOCK(LVWORK+k). With IFLODR = 1, PSHORTTRK
+  // re-enters the recovered tracks only after the neutral pass, slot k as
+  // VECP row NVECP-INREC+k, and PSHCHREC then copies
+  // LVSELE/LVLOCK(LVWORK+INREC) -- the LAST recovery's -- into every one of
+  // them. The converter publishes slot k for row NVECP-INREC+k instead, and
+  // rebuilds that row's LVLOCK as SKELANA's final PSHORTTRK loop would have:
+  // the work LVLOCK plus the word's bits 1 and 32. With one recovered
+  // neutral, k = INREC and nothing changes. The mapping holds only if the
+  // recovered rows are exactly the last INREC rows; if they are not, the
+  // event's recovered neutrals get -1 (no usable word) and a warning.
+  const int first_recovered_row = sk::NVECP - sk::INREC + 1;
+  bool recovery_slots_ok = sk::IFLODR == 1 && sk::INREC >= 1 &&
+                           sk::INREC <= sk::MTRACK;
+  if (recovery_slots_ok) {
+    for (int i = sk::LVPART; i <= sk::NVECP; ++i) {
+      const int lm = std::lround(sk::VECP(7, i)) == 0 && sk::LVECP(i) > 0
+                         ? lphpa("MAIN", sk::LVECP(i)) : 0;
+      const bool recovered = lm > 0 && std::lround(ph::Q(lm + 8)) != 0;
+      if (recovered != (i >= first_recovered_row)) recovery_slots_ok = false;
+    }
+  }
+  int n_unmapped_recovered = 0;
+  auto recovery_slot = [&](int vecp_i) {
+    return recovery_slots_ok ? sk::LVWORK + vecp_i - first_recovered_row + 1 : 0;
+  };
+
   auto push_particle_words = [&](int vecp_i, int lpa, int lmain,
                                  VecpStatus status, bool chargedPa) {
     // PSHSCT uses the beam spot when no usable primary vertex exists.
@@ -267,9 +296,22 @@ void TrackingWriter::emit()
     // It also decided whether a charged PA was kept or recovered as neutral.
     const bool missingSelectionReference = sk::IERRBS != 0 &&
         sk::KVTX(16, 1) > 0 && chargedPa;
-    lvlockCol.push_back(vecp_i >= 1 && !missingSelectionReference
-                           ? sk::LVLOCK(vecp_i) : -1);
-    lvseleCol.push_back(vecp_i >= 1 ? sk::LVSELE(vecp_i) : -1);
+    std::int32_t word = vecp_i >= 1 ? sk::LVSELE(vecp_i) : -1;
+    std::int32_t lock = vecp_i >= 1 ? sk::LVLOCK(vecp_i) : -1;
+    if (status == VecpStatus::RecoveredNeutral && sk::IFLODR == 1) {
+      const int slot = recovery_slot(vecp_i);
+      if (slot > 0) {
+        word = sk::LVSELE(slot);
+        lock = static_cast<std::int32_t>(
+            static_cast<std::uint32_t>(sk::LVLOCK(slot)) |
+            (static_cast<std::uint32_t>(word) & 0x80000001u));
+      } else {
+        word = lock = -1;
+        ++n_unmapped_recovered;
+      }
+    }
+    lvlockCol.push_back(missingSelectionReference ? -1 : lock);
+    lvseleCol.push_back(word);
     statusCol.push_back(static_cast<std::int32_t>(status));
     chargeCodeCol.push_back(static_cast<std::int32_t>(std::lround(ph::Q(lmain + 8))));
     vecpChargeCol.push_back(vecp_i >= 1 ? sk::VECP(7, vecp_i) : kNaN);
@@ -478,6 +520,12 @@ void TrackingWriter::emit()
                 << " neutral row (neutral row not emitted)";
     }
     std::cerr << "\n";
+  }
+  if (n_unmapped_recovered > 0) {
+    std::cerr << "delphi_edm4hep::tracking: WARNING: " << n_unmapped_recovered
+              << " recovered neutral(s) whose SKELANA work slot could not be"
+              << " identified (recovered rows are not the last INREC = "
+              << sk::INREC << " VECP rows): SelectionWord/Flag -1\n";
   }
 
   // Push all collections into the Frame via the base class's put().

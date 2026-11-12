@@ -406,11 +406,31 @@ in `sDST_VECP_Particles_SelectionWord`.
   clear. A recovered neutral (`VecpStatus` 2) carries bit 20 and, in bits
   2–7, the neutral-cut bits of its calorimeter deposits (`PSHCTRECCAL`
   copies `INTFAIL`, although the `PSHORTSEL` header says the charged bits);
-  why its charged track failed is not kept by SKELANA. **With this
-  converter's `IFLODR = 1`, every recovered neutral of an event carries the
-  word (and `SelectionFlag`) of the last track recovered in that event**:
-  `PSHCHREC` copies `LVSELE(LVWORK+INREC)` after all recoveries are
-  counted. Published as SKELANA left it.
+  why its charged track failed is not kept by SKELANA.
+
+  **Converter-side correction of a SKELANA ordering bug (recovered
+  neutrals only).** `PSHCTRECCAL` stores the k-th recovery's word in the
+  work slot `LVSELE(LVWORK+k)` (and its `LVLOCK` bit 32 in
+  `LVLOCK(LVWORK+k)`), `LVWORK = 2*MTRACK`. With this converter's
+  `IFLODR = 1`, `PSHORTTRK` re-enters the recovered tracks only after the
+  neutral pass, slot k as VECP row `NVECP−INREC+k`, and `PSHCHREC` then
+  copies `LVSELE(LVWORK+INREC)` / `LVLOCK(LVWORK+INREC)` — the *last*
+  recovery's — into every one of them (`skelana.car`, `PSHCHREC`:
+  `LVSELE(I)=LVSELE(LVWORK+INREC)`, `LVLOCK(I)=LVLOCK(LVWORK+INREC)`;
+  re-entry loop in `PSHORTTRK` after `IF (IFLODR.EQ.1.AND.ICNTYPE.LT.2)
+  GOTO 11`). With `IFLODR = 0` the copy follows each recovery and is
+  correct. The converter therefore publishes, for a `VecpStatus` 2 entry,
+  its own recovery's work word in `SelectionWord` and, in `SelectionFlag`,
+  the `LVLOCK` SKELANA's final loop would have built from it (work
+  `LVLOCK` plus the word's bits 1 and 32; the beam-spot −1 still applies),
+  so `SelectionFlag = SelectionWord & (bit 1 | bit 32)` holds on every row.
+  **With a single recovered neutral in the event nothing changes** (k =
+  INREC). Where an event has several, the library's value of each is the
+  word of the event's last `VecpStatus` 2 entry (recoveries happen in MAIN
+  order), so it remains visible. The converter checks that the recovered
+  rows are exactly the last `INREC` VECP rows; if not, it writes −1 to
+  both arrays for that event's recovered neutrals and warns (never seen).
+  `align_audit.py` and `audit_root.py` count the corrected rows.
 - `sDST_MAIN_Particles_VecpStatus` (UserData&lt;int32&gt;) — how the entry
   relates to SKELANA's VECP particle list. Parallel to `sDST_MAIN_Particles`.
 
@@ -418,7 +438,7 @@ in `sDST_VECP_Particles_SelectionWord`.
   |---|---|---|---|---|
   | 0 | own row | a PA with its own VECP row (charged or neutral) | from that row | `LVLOCK` (−1 only for the beam-spot case) |
   | 1 | recovered source | charged PA whose charged row SKELANA removed and re-entered as a neutral (calorimeter recovery, `PSHCTRECCAL`/`PSHCHREC`) | NaN | −1 |
-  | 2 | recovered neutral | that neutral: `charge = 0`, massless, energy = the sum of the PA's HPC, EMF, HCAL and STIC energies passing the neutral cuts, direction of the first such shower (beam-spot corrected) | from the recovered row | `LVLOCK` of that row |
+  | 2 | recovered neutral | that neutral: `charge = 0`, massless, energy = the sum of the PA's HPC, EMF, HCAL and STIC energies passing the neutral cuts, direction of the first such shower (beam-spot corrected) | from the recovered row | `LVLOCK` of its own recovery (converter-corrected, see `SelectionWord`) |
   | 3 | no row | charged PA with no VECP row at all | NaN | −1 |
 
   A status-2 entry directly follows its status-1 source, and its `particles`
@@ -432,8 +452,8 @@ in `sDST_VECP_Particles_SelectionWord`.
   summing finite MAIN 4-vectors counts the recovered energy once. Its PA
   words (`ReconstructionCode`, `DetectorMask`, `TrackLength`) repeat those of
   the source PA; so do `ChargeCode`, `IdentificationWord`, `MassCode` and
-  `EnergyError`. Its `SelectionWord` is that of the recovered row (see
-  there for what it holds).
+  `EnergyError`. Its `SelectionWord` and `SelectionFlag` are those of its
+  own recovery (see `SelectionWord` for the correction of SKELANA's copy).
 
   > Earlier revisions (up to `d09cd51`) wrote 0 for the 4-momentum of status
   > 1 and 3 entries, did not emit the recovered neutral, and attached the

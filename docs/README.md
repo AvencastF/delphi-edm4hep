@@ -166,21 +166,43 @@ collection they describe, NaN where there is no source.
 **SKELANA's selection word.** `LVSELE` (common `/TRKINF/`, keep `TRACKNTP`
 in `stdcdes.car`; bound in `skelana/trackntp.hpp`) is indexed by VECP row
 like `LVLOCK`, which receives its bits 1 and 32 at the end of `PSHORTTRK`.
-Entries above `LVWORK = 2*MTRACK` are SKELANA's scratch for recovered
-tracks and are not published. `sDST_VECP_Particles_SelectionWord` is the
-row's word, raw. Two source facts matter when reading it:
+Entries above `LVWORK = 2*MTRACK` (keep `PSCVECJJ`) are SKELANA's work
+area for recovered tracks. `sDST_VECP_Particles_SelectionWord` is the row's
+word, raw, except for recovered neutrals (below). Two source facts matter
+when reading it:
 - `PSHCTRECCAL` stores the recovered track's *neutral* cut bits (`INTFAIL`)
   in bits 2–11 of its work word, contrary to the `PSHORTSEL` header; the
   charged failure reason of a recovered track is not kept.
-- With `IFLODR = 1` the recovered neutrals are re-entered after the PA loop,
-  when `INREC` already counts every recovery, so `PSHCHREC`'s
-  `LVSELE(I) = LVSELE(LVWORK+INREC)` (and the same for `LVLOCK`) gives each of
-  them the last track's word. With `IFLODR = 0` the copy happens right after
-  each recovery and is correct.
-The per-track failure words `ICTFAIL` (`/CHGEDTRK/`), `INTFAIL` (`/NEUTRK/`)
-and the counter `INREC` (`/RECOVER/`) are scalars overwritten for every
-track, so after the event they describe only the last one; they are not
-published.
+- **SKELANA ordering bug, corrected in the converter.** `PSHCTRECCAL`
+  (`INREC = INREC+1`, `LVECP(LVWORK+INREC) = LVECP(I)`, then `MVBITS`/`SBIT1`
+  into `LVSELE(LVWORK+INREC)` and bit 32 of `LVLOCK(LVWORK+INREC)`) fills one
+  work slot per recovery, in the charged pass, so in PV→PA order. With
+  `IFLODR = 1`, `PSHORTTRK` re-enters the recovered tracks after the neutral
+  pass (`DO WHILE (LVECP(LVWORK+I).NE.0)`: `NVECP = NVECP+1`,
+  `PSHCHREC(LVECP(LVWORK+I))`), so slot k becomes VECP row `NVECP−INREC+k`.
+  By then `INREC` counts every recovery, and `PSHCHREC`'s
+  `LVSELE(I) = LVSELE(LVWORK+INREC)` / `LVLOCK(I) = LVLOCK(LVWORK+INREC)`
+  gives each of them the *last* recovery's word and `LVLOCK`. With
+  `IFLODR = 0` the copy happens right after each recovery and is correct.
+  (Lines in `artifacts/historical-hpc-20261006/skelana.car`: `PSHCTRECCAL`
+  8009–8022, re-entry loop 2166–2179, `PSHCHREC` 8367–8368; the installed
+  `dstana/161018` has the same code five lines earlier.) `Tracking.cpp`
+  publishes for a recovered neutral in VECP row `i` the slot
+  `LVWORK + i − (NVECP−INREC)` instead, and as `SelectionFlag` that slot's
+  `LVLOCK` plus the word's bits 1 and 32 (what the final `PSHORTTRK` loop
+  adds), so `SelectionFlag = SelectionWord & (bit 1 | bit 32)` holds for
+  every row. It first checks that the recovered rows (`VECP(7) = 0`, `LVECP`
+  a charged PA) are exactly rows `NVECP−INREC+1 … NVECP`; otherwise that
+  event's recovered neutrals get −1 in both arrays, with a warning. With one
+  recovered neutral the slot is `LVWORK+INREC` and nothing changes. The
+  mapping was verified event by event on 19 test files (2026-11-12): rows at
+  the tail in slot order, PAs in walk order, and the slot word reproducing
+  the row's energy (its calorimeter fail bits) and its vertex lock (bit 32,
+  `PSVECWANT`).
+The per-track failure words `ICTFAIL` (`/CHGEDTRK/`) and `INTFAIL`
+(`/NEUTRK/`) are scalars overwritten for every track, so after the event they
+describe only the last one; they are not published. `INREC` (`/RECOVER/`,
+bound in `skelana/trackntp.hpp`) is read only for the slot mapping.
 
 The PSCVTX primary slot has its own per-event geometry sentinel. `Vertex.cpp`
 falls back to the raw ZEBRA chain (`LQ(LDTOP-1)`) whenever that slot is

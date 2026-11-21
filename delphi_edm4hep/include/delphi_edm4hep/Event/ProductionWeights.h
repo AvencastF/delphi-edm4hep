@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <set>
@@ -13,11 +14,15 @@ namespace delphi_edm4hep {
 // identity and signed-weight bookkeeping can also be tested without ROOT.
 class ProductionWeights {
   struct Entry { int trial; double weight; };
+  // Optional generator tau polarimeters (prepare_weights.py TAU_POLARIMETERS section), per event.
+  struct Taus { std::vector<int> pdg, meMode; std::vector<double> p4, polarimeter; };
   int run_{};
   double sigma_{}, error_{};
   std::string provenance_;
   std::map<int, Entry> entries_;
   std::set<int> converted_;
+  bool hasTaus_{};
+  std::map<int, Taus> taus_;
 public:
   explicit ProductionWeights(const std::string& path) {
     std::ifstream in(path);
@@ -39,7 +44,26 @@ public:
       entries_.emplace(event, Entry{trial, weight});
     }
     std::string extra;
-    if (in >> extra) throw std::runtime_error("Extra production weight records");
+    if (in >> extra && extra == "TAU_POLARIMETERS") {
+      int n{};
+      if (!(in >> n) || n < 0) throw std::runtime_error("Invalid tau polarimeter header");
+      hasTaus_ = true;
+      for (int i = 0; i < n; ++i) {
+        int event{}, pdg{}, meMode{}; double v[8];
+        if (!(in >> event >> pdg >> meMode) || !entries_.count(event) || std::abs(pdg) != 15)
+          throw std::runtime_error("Invalid tau polarimeter record");
+        // Tokens via stod: an unidentified channel (meMode -1) carries nan, which operator>> rejects.
+        for (double& x : v) {
+          std::string token;
+          if (!(in >> token)) throw std::runtime_error("Invalid tau polarimeter record");
+          x = std::stod(token);
+        }
+        Taus& t = taus_[event];
+        t.pdg.push_back(pdg); t.meMode.push_back(meMode);
+        t.p4.insert(t.p4.end(), v, v + 4); t.polarimeter.insert(t.polarimeter.end(), v + 4, v + 8);
+      }
+      if (in >> extra) throw std::runtime_error("Extra tau polarimeter records");
+    } else if (in) throw std::runtime_error("Extra production weight records");
   }
 
   template<class Frame> void event(Frame& frame, int run, int event) {
@@ -48,6 +72,13 @@ public:
       throw std::runtime_error("Missing, wrong-run or duplicate MC weight identity");
     frame.putParameter("mc_gen_weight", it->second.weight);
     frame.putParameter("mc_generator_trial", it->second.trial);
+    if (!hasTaus_) return;
+    // Every event of a chunk with the section carries the four parallel lists, empty without decayed taus.
+    const Taus& t = taus_[event];
+    frame.putParameter("mc_tau_pdg", t.pdg);
+    frame.putParameter("mc_tau_me_mode", t.meMode);
+    frame.putParameter("mc_tau_p4", t.p4);
+    frame.putParameter("mc_tau_polarimeter", t.polarimeter);
   }
 
   template<class Frame> void metadata(Frame& frame) const {
@@ -57,6 +88,7 @@ public:
     frame.putParameter("mc_cross_section_pb", sigma_);
     frame.putParameter("mc_cross_section_error_pb", error_);
     frame.putParameter("mc_production_json", provenance_);
+    if (hasTaus_) frame.putParameter("mc_tau_polarimeter_schema", 1);
     std::vector<int> generated, trials, converted, missing, reserve;
     std::vector<double> weights;
     const int last = converted_.empty() ? 0 : *converted_.rbegin();

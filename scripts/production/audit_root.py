@@ -11,13 +11,20 @@ with fadgen.open('rb') as f:
   if not n: break
   fad.append([struct.unpack_from('<5i10f',b,4+60*i) for i in range(n)])
 reader=root_io.Reader(str(rootfile)); sizes={}; ids=[]; errors=[]; eventrows=[]; truthstats=collections.Counter(); ecs=collections.Counter(); tags=collections.Counter(); max_pdiff=0.; max_vdiff=0.; comparable=0
-from prepare_weights import prepare
+from prepare_weights import prepare, tau_polarimeters
 from align_audit import recovered_word_corrections
 prepare(Path.cwd())  # independently revalidate the production inputs
 with Path('event-weights.csv').open() as stream:
  weight_rows={int(r['hepmc_event']):r for r in csv.DictReader(stream)}
 expected_run=-int(json.loads(Path('task.json').read_text())['run'])
 observed_weights=[]
+# Optional generator tau polarimeters (production/generate.cpp): read back per event against the CSV.
+tau_rows=tau_polarimeters(Path.cwd(),len(weight_rows)); expected_taus=collections.defaultdict(list); observed_taus=0
+for r in tau_rows or []: expected_taus[r[0]].append(r[1:])
+def parameter_list(frame,name):
+ try: v=frame.get_parameter(name)
+ except (KeyError,RuntimeError): return []
+ return [v] if isinstance(v,(int,float)) else list(v)
 reco_diagnostics=dict(no_own_row_charged=0,no_own_row_selected_charged=0,recovered_neutrals=0,charge_codes=collections.Counter(),vecp_charges=collections.Counter(),mass_codes=collections.Counter(),perigee_refitted=collections.Counter(),selection_bits=collections.Counter(),recovered_own_words=collections.Counter())
 for i,fr in enumerate(reader.get('events')):
  run=int(fr.get_parameter('sDST_EVT_runNumber')); evt=int(fr.get_parameter('sDST_EVT_eventNumber')); ids.append((run,evt))
@@ -27,6 +34,13 @@ for i,fr in enumerate(reader.get('events')):
  row=weight_rows[evt]
  if weight!=float(row['weight']) or trial!=int(row.get('generator_trial',-1)): raise ValueError('Embedded weight mismatch')
  observed_weights.append(weight)
+ if tau_rows is not None:
+  pdg,me,p4,h=(parameter_list(fr,'mc_tau_'+k) for k in ('pdg','me_mode','p4','polarimeter'))
+  got=[(pdg[k],me[k],*p4[4*k:4*k+4],*h[4*k:4*k+4]) for k in range(len(pdg))]
+  if len(p4)!=4*len(pdg) or len(h)!=4*len(pdg) or len(me)!=len(pdg) or len(got)!=len(expected_taus[evt]) or any(
+     a!=b and not (math.isnan(a) and math.isnan(b)) for g,e in zip(got,expected_taus[evt]) for a,b in zip(g,e)):
+   raise ValueError('Embedded tau polarimeter mismatch')
+  observed_taus+=len(got)
  ecs[str(fr.get_parameter('sDST_EVT_ECMS'))]+=1; tags[str(fr.get_parameter('sDST_EVT_dstProcessingTag'))]+=1
  names=set(map(str,fr.getAvailableCollections()))
  for name in names:
@@ -106,6 +120,7 @@ for fr in reader.get('metadata'):
  meta.append({key:fr.get_parameter(key) for key in ('dst_pa_modules_present','dst_pilot_blocklets_present','skelana_IFLCUT','skelana_IFLSTR')})
 if len(meta)!=1: raise ValueError('Expected one production metadata frame')
 summary=dict(events=len(ids),unique_identities=len(set(ids)),run_counts=dict(collections.Counter(r for r,e in ids)),event_min=min((e for r,e in ids),default=None),event_max=max((e for r,e in ids),default=None),ecms_counts=dict(ecs),processing_tags=dict(tags),collections=sizes,metadata=meta,truth_stats=dict(truthstats),fadgen_slot_comparable_events=comparable,max_momentum_difference_gev=max_pdiff,max_relative_vertex_difference_mm=max_vdiff,errors=errors)
+if tau_rows is not None: summary['tau_polarimeter_audit']=dict(passed=True,converted_taus=observed_taus,generated_taus=len(tau_rows))
 summary['weight_audit']=dict(passed=True,count=len(observed_weights),sumw=math.fsum(observed_weights),sumw2=math.fsum(w*w for w in observed_weights),negative_count=sum(w<0 for w in observed_weights),min=min(observed_weights,default=None),max=max(observed_weights,default=None))
 summary['reco_diagnostics']=reco_diagnostics
 if len(ids)!=len(set(ids)): errors.append(['duplicate_identities'])

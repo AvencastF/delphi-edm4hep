@@ -21,6 +21,25 @@ The existing `sDST_EVT_runNumber` and `sDST_EVT_eventNumber`, together with the
 chunk provenance, identify the event. Nominal-only is explicit: the current
 generators do not provide PDF/scale/spin variation-weight vectors here.
 
+## Generator tau polarimeters (added 2026-11-21, not yet built or run)
+
+When the generation step wrote `tau-polarimeters.csv` (Pythia path,
+`delphi-sim-pipeline/production/generate.cpp`), every event frame of the chunk
+also carries four parallel lists, one entry per tau decayed by the generator
+(empty when the event has none):
+
+| Parameter | Meaning |
+|---|---|
+| `mc_tau_pdg` | tau PDG code (+15 tau-, -15 tau+). |
+| `mc_tau_me_mode` | Pythia decay-channel meMode; 0 = phase-space channel (h = 0 by construction), -1 = channel not identified (polarimeter NaN). |
+| `mc_tau_p4` | tau lab (E, px, py, pz) in GeV, double precision from the generator, for matching to `sDST_LUJ_GenParticles` by PDG and momentum (the LUJ order is not guaranteed to follow the generator record). |
+| `mc_tau_polarimeter` | Lab four-vector H = (E, px, py, pz) of the polarimeter: in the tau rest frame H = (0, h), the decay density of a tau with spin vector s is proportional to 1 + h.s (tau- and tau+ alike). Boost H like any momentum to obtain h in a chosen rest frame. |
+
+The file metadata frame then has `mc_tau_polarimeter_schema=1`, and the
+provenance JSON the CSV checksum. Chunks without the CSV (BHWIDE, WHIZARD,
+older builds) are unchanged. The ROOT audit compares every embedded entry with
+the CSV.
+
 ## Single file metadata frame
 
 - `mc_weight_schema=1`, `mc_weight_names=[nominal]`, `mc_run_number`.

@@ -93,11 +93,12 @@ def perigee_violations(perigee, track, status, fit=None, pa_error=None):
             bad.append("refitted FitQuality outside the CONFPV probability range")
     if flag == 0:
         # Not refitted: the words are PA.TRAC, the source of the AtIP state
-        # (Helix::fromPerigee: D0 = -10 d0, Z0 = 10 z0, omega = 1/R / 10).
+        # (Helix::fromPerigee: D0 = -10 d0, Z0 = 10 z0, omega = -(1/R) / 10: DELPHI signs 1/R
+        # geometrically, opposite to the charge; EDM4hep's omega carries the charge sign).
         st = list(track.getTrackStates())[0]
         g = {n: float(perigee[n][k]) for n in ("D0", "Z0", "Theta", "Phi", "InvR")}
         want = (f32(-10 * g["D0"]), f32(10 * g["Z0"]), g["Phi"],
-                f32(g["InvR"] / 10), 1 / math.tan(g["Theta"]))
+                f32(-g["InvR"] / 10), 1 / math.tan(g["Theta"]))
         got = (st.D0, st.Z0, st.phi, st.omega, st.tanLambda)
         tol = (1e-9, 1e-9, 1e-9, 1e-12, 1e-5)  # tanLambda: float cos/sin
         if int(st.location) != 1 or not all(

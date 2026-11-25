@@ -33,6 +33,7 @@
 #include <edm4hep/RecDqdxCollection.h>
 #include <podio/Frame.h>
 
+#include <cassert>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -206,6 +207,7 @@ void ParticleIdWriter::emit()
     // A row is written when the tag is set or the PA carries a MUID module,
     // so "module present, no tag" is no longer an absent row. Values PSHMUO
     // did not fill are NaN; [3] is the raw module word 2 (NaN: no module).
+    // Slot order and the tag bit masks are in Pid/ParticleId.h.
     {
       const int tag = sk::KMUID(1, i);
       const int lpa = sk::LVECP(i);
@@ -219,6 +221,7 @@ void ParticleIdWriter::emit()
         pid.addToParameters(filled ? sk::QMUID(2, i) : kNaN);
         pid.addToParameters(filled ? static_cast<float>(sk::KMUID(3, i)) : kNaN);
         pid.addToParameters(word2);
+        assert(pid.getParameters().size() == kMuCount);
       }
     }
 

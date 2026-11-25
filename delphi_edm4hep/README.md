@@ -195,8 +195,9 @@ How each EDM4hep datatype is populated (units: mm, GeV, ns, rad throughout):
   DELPHI track-fit values. Charge and momentum are **not** on the Track — they
   are on the associated ReconstructedParticle.
 - **ReconstructedParticle** — `momentum` (px,py,pz), `energy`, `mass` (GeV);
-  `charge` in units of e (0 when the DELPHI charge code is "undefined");
-  `tracks` / `clusters` / `particleIDs` relations.
+  `charge` in units of e (`NaN` when the DELPHI charge code is "undefined",
+  i.e. charged with unknown sign); `tracks` / `clusters` / `particleIDs`
+  relations.
 - **Vertex** — `position` (mm); `covMatrix` is the 6-element lower triangle
   `(XX, XY, YY, XZ, YZ, ZZ)` in mm²; `chi2`, `ndf`; `primary` flag;
   `algorithmType`. The meaning of `particles` is collection-specific and is
@@ -338,6 +339,10 @@ in `sDST_VECP_Particles_SelectionWord`.
 - `sDST_TBL_RecoToGen` (RecoMCParticleLink) — exact reconstructed→generated
   correspondence from the DELPHI association tables (not a geometric match);
   `from` = `sDST_MAIN_Particles`, `to` = `sDST_LUJ_GenParticles`.
+  Upstream's `STSH_MCParticles` / `TBL_RecoToMC` (generator record plus
+  DELSIM-created particles, upstream commit 1beb7fc) is not adopted on this
+  branch: the published names and the vertex/endpoint status arrays above are
+  kept.
 
 **Tracks & particles**
 
@@ -380,7 +385,7 @@ in `sDST_VECP_Particles_SelectionWord`.
   Layout of PA.TRAC words 2..21, DELPHI units and signs, no conversion:
   `PerigeeD0` (cm, DELPHI sign — the `AtIP` `D0` is −10× this), `PerigeeZ0`
   (cm), `PerigeeTheta` (rad), `PerigeePhi` (rad), `PerigeeInvR` (1/R, 1/cm,
-  signed: the `AtIP` `omega` is this / 10), then the weight matrix (inverse
+  signed geometrically, opposite to the charge: the `AtIP` `omega` is −this / 10), then the weight matrix (inverse
   covariance) of those five in that order, `PerigeeWeightIJ` = element
   (I, J), I ≥ J, in the matching inverse units. SKELANA copies PA.TRAC into
   these words (`PSHTRA`), so they equal the `AtIP` state's source unless
@@ -551,6 +556,12 @@ in `sDST_VECP_Particles_SelectionWord`.
   7 RIB, 9 OD, 10 HPC, 14 HAB, 15 MUB, 19 STIC, 21 FCA, 22 RIF, 23 HAF,
   26 FCB, 27 EMF, 31 MUF.
 
+  > **Bit numbers are DELPHI's, counted from 1** — so bit 6 (TPC) is
+  > `value & (1 << 5)`, not `1 << 6`. Using the number directly as a C shift
+  > selects the neighbouring detector, which returns a wrong but entirely
+  > believable answer rather than an error. Named masks in
+  > `Tracking/Tracking.h`.
+
   > **Bit 4 is "VD or VFT", not VD alone** — DELPHI's own code says so
   > (`mammoth.car:13556`), though the content note predates the VFT and still
   > calls it VD. At LEP2 it is set on every VFT-reconstructed track, so a
@@ -588,7 +599,8 @@ in `sDST_VECP_Particles_SelectionWord`.
   `sDST_AABTAG_TrackTag` rows carry an attached-to-PV flag.
 - `sDST_BSP_BeamSpot` (Vertex, 0 or 1 entry) — the official beamspot: position with
   a diagonal covariance built from the beam widths; `algorithmType = 2` marks
-  "beamspot bank, not a fit". (See also `delphi_bs_fit` in §3.)
+  "beamspot bank, not a fit". Position and covariance are NaN when
+  `sDST_EVT_BeamSpotErrorCode` is 2. (See also `delphi_bs_fit` in §3.)
 - `sDST_V0_V0Candidates` (Vertex) — the official DELPHI V0 vertices (K⁰s / Λ /
   γ-conversion candidates); `position` from the V0 fit, with the two daughter
   particles in the `particles` relation. (Covariance is left zero — the bank's
@@ -699,8 +711,7 @@ in `sDST_VECP_Particles_SelectionWord`.
   > not recoverable: the routine that computes it needs VD pulse heights, which the
   > shortDST does not carry. From 1996 the per-hit VD signal-to-noise ratio is
   > available instead, in `eDep` on `sDST_TDVD_VDHits` / `_VDPoints`.
-- `sDST_MUID_MuonID` (algType 2) — `[0]` muon tag (MUCAL2: 1 very-loose …
-  4 tight, 5 HCAL; from the PA header), `[1]` global χ² of the very-loose
+- `sDST_MUID_MuonID` (algType 2) — `[0]` MUCAL2 tag (a bit mask, see below; from the PA header), `[1]` global χ² of the very-loose
   refit, `[2]` hit pattern, `[3]` raw word 2 of the PA's MUID extra module.
   A row exists when the tag is non-zero **or** the PA carries a MUID module,
   so a tag of 0 with `[3]` finite means "module present, no tag passed". No
@@ -708,6 +719,13 @@ in `sDST_VECP_Particles_SelectionWord`.
   (module present with bit 1 of word 2 set, `PSHMUO`); `[3]` is NaN without a
   module. What the module's presence says about muon-chamber acceptance is
   not established here; read word 2 against the DELPHI MUID documentation.
+
+  > **`[0]` is a bit mask, not a level**, with DELPHI's 1-based bit numbers:
+  > 1 very loose, 2 loose, 3 standard, 4 tight, 5 HCAL — test
+  > `value & (1 << (N-1))`. The four chamber tags nest; HCAL is independent and
+  > occurs alone, so `>= 2` also admits an HCAL-only tag with no chamber
+  > requirement. Standard is the loosest tag requiring a hit outside the iron.
+  > Named masks in `Pid/ParticleId.h`.
 - `sDST_ELID_ElectronID` (algType 3) — `[0]` electron tag (0 not run, 1 not-e,
   2 very-loose, 3 loose, 4 standard, 5 tight), `[1]` γ-conversion tag.
 - `sDST_PHOT_PhotonID` (algType 30) — up to seven raw PHOT words starting
@@ -790,8 +808,10 @@ in `sDST_VECP_Particles_SelectionWord`.
   > The stage digit is 0 on files written before PXDST 2.87.
   >
   > **Detectors measure different quantities, and what a module did not measure
-  > is `NaN` — never 0, which is a legal measured value.** `D0` and `Z0` are
-  > always `NaN`: a track element measures a point, not an impact parameter.
+  > is `NaN` — never 0, which is a legal measured value.** The reference point
+  > is on the fitted segment, so `D0` and `Z0` are 0 when the coordinate that
+  > defines them was measured and `NaN` otherwise (e.g. `Z0` on an
+  > inner-detector jet-chamber element, which does not measure z).
   > Typically the TPC gives direction and curvature, the inner detector
   > curvature but not the dip angle, and the outer detector, forward RICH and
   > straw tubes direction only. It varies element by element, so test for `NaN`
@@ -841,8 +861,9 @@ in `sDST_VECP_Particles_SelectionWord`.
   (9 HPC / 26 EMF), `[1]` number of showers.
 - `fDST_TDID_DriftCalib` (ParticleID, algType 17) — `[0]` signed jet sector,
   `[1]` number of valid drift wires, `[2]` sum of drift times.
-- `fDST_EMCA_HPCClusters` (CalorimeterHit) — per-pad HPC: `energy` =
-  photo-electrons, `energyError` = σ_z, `type` = layer (1..10), `position` mm.
+- `fDST_EMCA_HPCClusters` (CalorimeterHit) — per-pad HPC: `energy` in GeV,
+  `type` = layer (1..10), `position` mm. `energyError` is `NaN`: PXHGET gives no
+  energy error. Its σ_z (the drift-time error on z) is not carried.
 - `fDST_EMCA_FEMCLayers` (CalorimeterHit) — per-layer FEMC: `energy` = layer
   energy, `type` = layer, `cellID` = n hits, `position` = shower centroid.
 - `fDST_HCAL_Towers` (CalorimeterHit) — per-tower HCAL: `energy` = tower
@@ -895,6 +916,10 @@ hemisphere 2, whole event), `ThrustAxis` and `ThrustValue`. The per-track
 quantities and AABTAG's primary vertex exist only for `AABTAG_*`; the stored
 bank has no per-track content. AABTAG's vertex is a separate collection and
 does not replace `sDST_PV_PrimaryVertex`.
+
+`AABTAG_*` also carries DELPHI's combined b-tag (DELPHI 97-094) and AABTAG's
+secondary vertices, which DELPHI computed but never stored. "Primary vertex"
+below always means `AABTAG_PrimaryVertex`, not `sDST_PV_PrimaryVertex`.
 
 > On simulation, AABTAG draws from the same random sequence as detector
 > smearing, so per-event values differ from a conversion made without it.
@@ -949,6 +974,23 @@ on output.
   VD hits Rφ and z, `[7]`/`[8]` VD layers Rφ and z, `[9]` used for the tag,
   `[10]` attached to the vertex. The hit and layer counts are signed: a
   negative value marks a rejected track, `abs()` is the count.
+  Slots `[11..21]` serve the combined tag:
+
+  | Slot | Content |
+  |---|---|
+  | 11 | jet: 1-based row of `AABTAG_CombinedTagRow`, 0 if none |
+  | 12 | thrust hemisphere (1, 2) |
+  | 13 | sign of the impact parameter (±1, always set) |
+  | 14 | distance along the jet axis to the track's closest approach (mm) |
+  | 15 | rapidity w.r.t. the jet |
+  | 16, 17 | track–jet distance and its error (mm) |
+  | 18 | secondary vertex using the track: `±row`, `+100` if in the fit, 0 if none |
+  | 19 | track quality: -98 no VD hits, -90 VD class, 10 in IP cut, -99 unset |
+  | 20 | jet after the secondary-vertex redefinition (as 11) |
+  | 21 | ≠ 0 if used for thrust and oblateness |
+
+  14, 16 and 17 are NaN together where AABTAG did not compute them; 13 is
+  still valid there.
 
   Impact parameters are on the track: each track AABTAG used carries a
   `TrackState` at `AtVertex`, with `referencePoint` at AABTAG's vertex, `D0`
@@ -974,6 +1016,43 @@ on output.
   `Truncated = 1`
   therefore means the capacity was reached and additional eligible tracks may
   have been clipped, not that clipping can be proved from the common alone.
+- `<source>_AABTAG_SecondaryVertices` (Vertex, `algorithmType = 5`) — every
+  secondary-vertex hypothesis; `particles` are its tracks. `chi2` is NaN and
+  `ndf` 0: DELPHI did not keep the fit χ².
+
+  | `parameters` | Content |
+  |---|---|
+  | 0 | ≥ 0 if accepted |
+  | 1, 2, 3 | tracks; tracks in the fit; rapidity tracks |
+  | 4 | jet: 1-based row of `AABTAG_CombinedTagRow` |
+  | 5 | 1 for a 3-D fit, 0 for Rφ only |
+  | 6 | combined track probability |
+  | 7 | displacement significance from the primary vertex (not a fit χ²) |
+  | 8 | NaN (never filled by DELPHI) |
+  | 9–12, 13–16 | momentum (px, py, pz, E; GeV), without and with rapidity tracks |
+  | 17, 18; 19–21 | θ, φ of the flight direction (rad); their covariance |
+  | 22, 23; 24–26 | D0, Z0 w.r.t. the primary vertex (mm, EDM4hep sign); covariance |
+  | 27… | track indices, then rapidity-track indices |
+
+- `<source>_AABTAG_CombinedTagRow` (ParticleID, `algorithmType = 6`) — one row
+  per AABTAG jet, in jet order; the jets themselves are not emitted. `type` is
+  the category (1 secondary vertex, 2 ≥ 2 significant tracks, 3 impact
+  parameters only, 4 as 3 without rapidity tracks, 0 untagged), `likelihood`
+  the jet tag X_jet.
+
+  | `parameters` | Content |
+  |---|---|
+  | 0–3 | jet axis (px, py, pz, E) |
+  | 4, 5, 6 | category, X_jet, thrust hemisphere |
+  | 7–12 | discriminating variables |
+  | 13–18, 19–24 | their uds/b and c/b likelihood ratios |
+  | 25–29 | combined ratios and the rapidity-track count |
+  | 30–33 | jet axis after the secondary-vertex redefinition |
+  | 34… | per rapidity track: index, rapidity, two ratios |
+
+- Frame parameters `CombinedTagEvent` (X_ev), `CombinedTagHemisphere` (largest
+  X_jet per hemisphere, NaN if none), `Oblateness`, and the counts
+  `NCombinedTagRows`, `NSecondaryVertexHypotheses`, `NSecondaryVertices`.
 
 `ImpactParRPhi` uses AABTAG's **own sign convention**, not the LCIO `D0` sign
 of the Track collections — the sign is the physics (the negative-IP side is
@@ -1040,12 +1119,16 @@ Helix::fromHelix(D0,phi,omega,Z0,tanLambda)
    -> .params() / .cov() / .momentum(B,q) / .toTrackState(location)
 ```
 
-with `omega = kOmega · q · B · (1/|p_T|)` (the transverse curvature), `kOmega =
-2.99792458e-4`. The TE bank momentum word is `1/|p_T|` or `1/|p|` per its descriptor,
-so `fromTrackElement` takes an `invPt` flag and divides by `sin(theta)` in the `1/|p|`
-case; the perigee path and `momentum()` treat `omega` as curvature too, so all are
-consistent. The covariance is a Jacobian push-forward (`J · C · Jᵀ`). The header is public
-so analysis code can convert track parameters (and recover momentum from
+with `omega` the transverse curvature carrying the sign of the charge, as EDM4hep
+requires. DELPHI signs `1/R` and `1/p` geometrically (positive is counter-clockwise
+seen from +z, opposite to the charge in its field), so the perigee path sets
+`omega = −invR/10` and `fromTrackElement` sets `omega = −kOmega · B · invP`
+(`kOmega = 2.99792458e-4`). The TE bank momentum word is `1/p_T` or `1/p` per its
+descriptor, so `fromTrackElement` takes an `invPt` flag and divides by `sin(theta)`
+in the `1/p` case. The muon/calorimeter extrapolation points of `PA.TRAX` store an
+unsigned `1/|p|`; the converter restores its sign from the track charge. The
+covariance is a Jacobian push-forward (`J · C · Jᵀ`). The header is public so
+analysis code can convert track parameters (and recover momentum from
 `omega` given B and charge) without running the converter. Raw bank *parsing*
 (`TeBank`, `HpcPadDecoder`) is separate and feeds the factories.
 

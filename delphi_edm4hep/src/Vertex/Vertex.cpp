@@ -25,7 +25,9 @@
 #include <podio/UserDataCollection.h>
 
 #include <cmath>
+#include <numbers>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -272,12 +274,10 @@ void VertexWriter::emit()
 
   // ----- Simulation PV (PSCVTX sim region: first entry only) -----
   // PSCVTX stores reco at 1..NVTXMX and simulation at NVTXMX+1..2*NVTXMX.
-  // Only the FIRST sim slot (NVTXMX+1) is reliable: it is the true IP
-  // (verified -- matches the MCParticle primary in 158/160 mumu/qq/bb
-  // events). NVTXMC over-counts on our DELSIM SDST, so slots 2..NVTXMC read
-  // uninitialised memory (monotonically growing, non-physical positions with
-  // no MCParticle counterpart) -- we must NOT emit those. Real simulation
-  // DECAY vertices live in sDST_LUJ_GenParticles (the reliable truth record).
+  // The first simulated slot (NVTXMX+1) is the true interaction point. The
+  // others are DELSIM's decay and interaction vertices; they are not emitted
+  // here; the decay vertices DELSIM tracked are in sDST_LUJ_GenParticles
+  // (Truth.cpp).
   if (sk::NVTXMC >= 1) {
     const int j = sk::NVTXMX + 1;
     auto vtx = vtxCol.create();
@@ -367,9 +367,9 @@ void VertexWriter::emit()
   // common is unfilled there), so compute them geometrically from each
   // track's AtIP perigee and the PV found above. Emitted parallel to
   // sDST_TRAC_Tracks (same order), in **mm**, LCIO sign convention
-  // (consistent with the TrackState the tracks carry). Linear (PV is ~mm
-  // from the origin, so the helix-curvature term is negligible at this
-  // precision); flag is 1 when a PV was available, 0 otherwise (value -999).
+  // (consistent with the TrackState the tracks carry). The track is followed
+  // along its circle to the point closest to the PV; flag is 1 when a PV was
+  // available, 0 otherwise (value -999).
   // NOTE the dual convention: this <tag>_PV_trackD0PV is the DATA-usable one
   // (mm, LCIO, parallel to TRAC_Tracks); the Tracking.cpp <tag>_TRAC_d0PV is
   // QTRAC converted cm->mm, DELPHI sign, also parallel to TRAC_Tracks
@@ -383,16 +383,29 @@ void VertexWriter::emit()
     const auto& tracks = frame_.get<edm4hep::TrackCollection>(
         makeName("TRAC", "Tracks"));
     for (const auto& trk : tracks) {
-      float d0pv = -999.f, z0pv = -999.f; std::int32_t flag = 0;
+      float d0pv = -999.f, z0pv = -999.f;
+      std::int32_t flag = kImpactMissing;
       if (have_pv) {
         // AtIP track state (referencePoint = origin by construction).
         for (const auto& ts : trk.getTrackStates()) {
           if (ts.location != edm4hep::TrackState::AtIP) continue;
-          const double phi = ts.phi;
-          const double s = std::sin(phi);
-          const double c = std::cos(phi);
-          d0pv = static_cast<float>(ts.D0 + (px * s - py * c));
-          z0pv = static_cast<float>(ts.Z0 - pz + ts.tanLambda * (px * c + py * s));
+          const double s = std::sin(ts.phi), c = std::cos(ts.phi);
+          if (ts.omega == 0.f) {          // straight track
+            d0pv = static_cast<float>(ts.D0 + (px * s - py * c));
+            z0pv = static_cast<float>(ts.Z0 - pz + ts.tanLambda * (px * c + py * s));
+          } else {
+            // A straight-line shift is wrong by up to ~1 mm in z0 for tracks
+            // passing far from the origin. Circle centre for the EDM4hep
+            // convention (omega > 0 turns clockwise seen from +z).
+            const double R   = 1.0 / ts.omega;
+            const double sgn = std::copysign(1.0, R);
+            const double dx  = px - (R - ts.D0) * s;
+            const double dy  = py + (R - ts.D0) * c;
+            d0pv = static_cast<float>(R - sgn * std::hypot(dx, dy));
+            const double phiPV = std::atan2(-sgn * dx, sgn * dy);
+            const double dphi  = std::remainder(phiPV - ts.phi, 2.0 * std::numbers::pi);
+            z0pv = static_cast<float>(ts.Z0 - ts.tanLambda * R * dphi - pz);
+          }
           flag = 1;
           break;
         }

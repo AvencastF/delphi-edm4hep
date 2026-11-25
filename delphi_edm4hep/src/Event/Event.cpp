@@ -10,6 +10,7 @@
 // than from the DST at all.
 
 #include "delphi_edm4hep/Event/Event.h"
+#include "delphi_edm4hep/internal/BeamSpotStatus.h"
 
 #include "phdst/functions.hpp"  // IPHPIC
 #include "phdst/phciii.hpp"
@@ -51,9 +52,9 @@ std::string processingTag() {
                            + ", event " + std::to_string(ph::IIIEVT) + ')');
 }
 
-// The beam energy and the beam spot each have a failure mode SKELANA does not
-// report: it substitutes a value and carries on, and the substitute reaches the
-// output looking like a measurement.
+// The beam energy has a failure mode SKELANA does not report: it substitutes a
+// value and carries on, and the substitute reaches the output looking like a
+// measurement. (The beam spot's is handled in internal/BeamSpotStatus.h.)
 void checkEventIsUsable() {
   // Without the DANA pilot blocklet the centre-of-mass energy is not read but
   // set to 91.250 GeV (skelana.car:2743-2748). That substitution cannot be
@@ -137,6 +138,9 @@ void EventWriter::emit() {
   // the DSTQID tag and looked up per run and cartridge — not from the DST.
   // For simulation it is instead the generated interaction point plus a
   // Gaussian smear, so it follows the event rather than describing a beam.
+  // Position and widths are NaN unless the lookup found this run-file's own
+  // entry (BeamSpotErrorCode 0): the preceding-entry fallback (1) is another
+  // run's beam spot. Upstream writes it for code 1 (beamspot::positionUsable).
   auto beamspot = parameters("EVT", Provenance::Derived);
   const auto measured = [](float value) {
     return sk::IERRBS == 0 ? value : std::numeric_limits<float>::quiet_NaN();

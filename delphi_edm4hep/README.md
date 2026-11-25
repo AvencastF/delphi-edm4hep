@@ -678,28 +678,6 @@ in `sDST_VECP_Particles_SelectionWord`.
 
   The quality flag is recovered by this converter: SKELANA computes it and
   discards it, so it is not available to a SKELANA analysis.
-- `sDST_GETDEDX_DedxHypotheses` / `sDST_BBDXGET_DedxHypotheses` (algType 46) —
-  DELPHI's own dE/dx expectation, error and pulls per mass hypothesis, from the
-  library that makes the measurement (`dedxid.car`: `BBDXGET`, `GETEXP` →
-  `CALDEDX`, `BBDXER`, `BBPULL`), combined as `BBDEDX` and `BBDXID` do. One row
-  per `..._Dedx` row, in the same order. 44 `params` (slot enums in
-  `Pid/ParticleId.h`):
-  - `[0]` gap, `[1]` method, `[2]` untruncated wire count (the `BBDXGET`
-    outputs that enter the error), `[3]` the momentum the expectation was
-    evaluated at (PA.MAIN word 7, GeV).
-  - Then ten blocks of four: `expected` dE/dx, the `error` expected on the
-    measurement under that hypothesis, the raw pull
-    `(measured − expected) / error`, and the gaussianised pull `BBPULL(raw)`.
-    Blocks 0–4 are electron, muon, pion, kaon, proton (DELPHI mass codes 2, 6,
-    41, 42, 65) with the standard expectation; blocks 5–9 the same hypotheses
-    with the isolated-track expectation (mass code + 100: ×1.011 for
-    PXDST ≥ 333, "computed on bhabha"). Block `b` starts at `4 + 4·b`.
-  - NaN: every word when `BBDXGET` has no measurement; a block when the
-    library returns no positive expectation or error.
-  - `CALDEDX` uses one expectation curve for data and simulation (its
-    simulation-specific `CALDEDM` call is commented out in the installed
-    library); `BBPULL` uses separate data and simulation tables, selected by
-    the run number.
 - `sDST_HAID_HadronID` (algType 4) — combined hadron ID, 18 params:
   `[0]` kaon-RICH tag, `[1]` proton-RICH, `[2]` pion-RICH, `[3]` kaon-dE/dx,
   `[4]` proton-dE/dx, `[5]` combined kaon likelihood, `[6]` combined proton

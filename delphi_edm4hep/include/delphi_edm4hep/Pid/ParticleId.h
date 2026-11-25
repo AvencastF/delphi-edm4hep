@@ -45,6 +45,48 @@ enum MuonIdTag : std::int32_t {
   kMuHcal      = 1 << 4   ///< HCAL, no muon-chamber requirement
 };
 
+/// Slot layout of the `<algo>_DedxHypotheses` `parameters` VectorMember
+/// (algorithmType 46), one row per `<algo>_Dedx` row and in the same order.
+/// Values are DELPHI's own (dedxid.car: BBDXGET, GETEXP -> CALDEDX, BBDXER,
+/// BBPULL), as BBDEDX and BBDXID combine them; NaN where the library gives
+/// none. Four leading words, then one block of #kDedxPerHypothesis words per
+/// hypothesis, first for the standard expectation and then for the
+/// isolated-track one (mass code + 100: the expectation scaled by 1.011 for
+/// PXDST >= 333, "computed on bhabha").
+/// @collection{BBDXGET_DedxHypotheses}
+enum DedxHypothesesIndex : std::size_t {
+  kDedxHypGap = 0,     ///< gap size BBDXGET returns (an input of BBDXER)
+  kDedxHypMethod,      ///< method word BBDXGET returns (an input of BBDXER)
+  kDedxHypWires,       ///< untruncated wire count BBDXGET returns
+  kDedxHypMomentum,    ///< momentum the expectation was evaluated at: PA.MAIN word 7 (GeV)
+  kDedxHypFirstBlock   ///< first word of the first hypothesis block
+};
+
+/// Hypotheses, in block order. DELPHI mass codes 2, 6, 41, 42, 65.
+enum DedxHypothesis : std::size_t {
+  kDedxElectron = 0, kDedxMuon, kDedxPion, kDedxKaon, kDedxProton,
+  kDedxHypothesisCount
+};
+
+/// Words of one hypothesis block.
+enum DedxHypothesisWord : std::size_t {
+  kDedxExpected = 0,   ///< expected dE/dx for the hypothesis (GETEXP)
+  kDedxError,          ///< error expected on the measurement under it (BBDXER)
+  kDedxPullRaw,        ///< (measured - expected) / error
+  kDedxPullGauss,      ///< BBPULL of the raw pull (data and MC tables differ)
+  kDedxPerHypothesis
+};
+
+/// First word of the block of hypothesis `h` (standard or isolated-track).
+constexpr std::size_t dedxHypothesisSlot(bool isolated, std::size_t h) {
+  return kDedxHypFirstBlock
+       + ((isolated ? kDedxHypothesisCount : 0) + h) * kDedxPerHypothesis;
+}
+
+/// Number of words in a `DedxHypotheses` row.
+constexpr std::size_t kDedxHypCount =
+    kDedxHypFirstBlock + 2 * kDedxHypothesisCount * kDedxPerHypothesis;
+
 class ParticleIdWriter : public CollectionWriter {
 public:
   using CollectionWriter::CollectionWriter;

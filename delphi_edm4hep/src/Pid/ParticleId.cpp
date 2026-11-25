@@ -50,6 +50,12 @@ extern "C" {
 // flag. Both live in dstana (dedxid.car).
 void  bbdxget_(int* lpa, float* dedx, float* gap, int* nwir, int* nmeth);
 float bbdxer_(float* dedxth, float* gap, int* nwir, int* nmeth, int* iqual);
+// GETEXP -> CALDEDX: expected dE/dx at momentum P for a DELPHI mass code (code
+// + 100: the isolated-track expectation). BBPULL: the pull after DELPHI's
+// gaussianisation, from separate data and simulation tables chosen by the run
+// number. Same library.
+void  getexp_(float* p, int* m, float* dedx, float* dsurdp);
+float bbpull_(float* xi);
 }
 
 namespace {
@@ -61,6 +67,7 @@ constexpr std::int32_t kAlgoDedx     = 1;
 constexpr std::int32_t kAlgoMuon     = 2;
 constexpr std::int32_t kAlgoElectron = 3;
 constexpr std::int32_t kAlgoHadronID = 4;
+constexpr std::int32_t kAlgoDedxHypotheses = 46;
 
 // PXDST version at or above which SKELANA runs BBDXGET in place of GETDEDX.
 constexpr int kBbdxMinPxdst = 333;
@@ -111,11 +118,66 @@ std::vector<int> dedxQuality(const tracking::Output& tracking)
   return quality;
 }
 
+// DELPHI mass codes of the hypotheses, in slot order (Pid/ParticleId.h).
+constexpr int kDedxHypothesisCodes[kDedxHypothesisCount] = {2, 6, 41, 42, 65};
+
+// The library's dE/dx expectation, error and pulls per emitted Particle, as
+// BBDEDX and BBDXID compute them (dedxid.car): BBDXGET for the measurement,
+// GETEXP at the MAIN momentum word for the expectation, BBDXER for the error
+// expected under that hypothesis, pull = (measured - expected) / error, and
+// BBPULL for its gaussianised form. Nothing is re-derived here. An empty
+// vector means the track has no dE/dx measurement (BBDXGET -1 or no wire).
+std::vector<std::vector<float>> dedxHypotheses(const tracking::Output& tracking)
+{
+  std::vector<std::vector<float>> rows(tracking.particle_handles.size());
+
+  pawalk::forEachPA([&](int lpa, int paIdx) {
+    if (paIdx >= static_cast<int>(tracking.pa_to_particle.size())) return;
+    const int p = tracking.pa_to_particle[paIdx];
+    if (p < 0) return;
+
+    float dedx = -1.f, gap = 0.f;
+    int   nwir = 0, nmeth = 0;
+    bbdxget_(&lpa, &dedx, &gap, &nwir, &nmeth);
+    if (dedx <= 0.f || nwir < 1) return;
+    const int lmain = pawalk::lphpa("MAIN", lpa);
+    if (lmain <= 0) return;
+    float momentum = ph::Q(lmain + 7);
+
+    std::vector<float> row(kDedxHypCount, kNaN);
+    row[kDedxHypGap]      = gap;
+    row[kDedxHypMethod]   = static_cast<float>(nmeth);
+    row[kDedxHypWires]    = static_cast<float>(nwir);
+    row[kDedxHypMomentum] = momentum;
+    for (int isolated = 0; isolated < 2; ++isolated) {
+      for (std::size_t h = 0; h < kDedxHypothesisCount; ++h) {
+        int   code = kDedxHypothesisCodes[h] + 100 * isolated;
+        float expected = -1.f, slope = 0.f;
+        getexp_(&momentum, &code, &expected, &slope);
+        if (!(expected > 0.f)) continue;   // BBDXID: no expectation, no pull
+        int   iqual = -1;
+        const float error = bbdxer_(&expected, &gap, &nwir, &nmeth, &iqual);
+        const std::size_t at = dedxHypothesisSlot(isolated != 0, h);
+        row[at + kDedxExpected] = expected;
+        row[at + kDedxError]    = error;
+        if (!(error > 0.f)) continue;
+        float raw = (dedx - expected) / error;
+        row[at + kDedxPullRaw]   = raw;
+        row[at + kDedxPullGauss] = bbpull_(&raw);
+      }
+    }
+    rows[p] = std::move(row);
+  });
+
+  return rows;
+}
+
 }  // namespace
 
 void ParticleIdWriter::emit()
 {
   edm4hep::ParticleIDCollection dedxCol;
+  edm4hep::ParticleIDCollection dedxHypCol;
   edm4hep::RecDqdxCollection    dqdxCol;
   edm4hep::ParticleIDCollection muonCol;
   edm4hep::ParticleIDCollection elecCol;
@@ -126,6 +188,7 @@ void ParticleIdWriter::emit()
     // the schema remains stable across events.
     put(std::move(dedxCol), dedxAlgo(), "Dedx", Provenance::Derived);
     put(std::move(dqdxCol), dedxAlgo(), "DedxRecDqdx", Provenance::Derived);
+    put(std::move(dedxHypCol), dedxAlgo(), "DedxHypotheses", Provenance::Derived);
     put(std::move(muonCol), "MUID", "MuonID", Provenance::Transcribed);
     put(std::move(elecCol), "ELID", "ElectronID", Provenance::Transcribed);
     put(std::move(hadrCol), "HAID", "HadronID", Provenance::Transcribed);
@@ -133,6 +196,7 @@ void ParticleIdWriter::emit()
   }
   const auto& tracking = *ctx_.tracking;
   const std::vector<int> quality = dedxQuality(tracking);
+  const std::vector<std::vector<float>> hypotheses = dedxHypotheses(tracking);
 
   // Helper: create a per-particle PID row of the given algorithmType,
   // attach to the matching Particle, and return the row for parameter
@@ -178,6 +242,14 @@ void ParticleIdWriter::emit()
         pid.addToParameters(sigma);
         pid.addToParameters(
             static_cast<float>(quality[tracking.vecp_to_particle[i]]));
+
+        // One row per dE/dx row, in the same order (parallel collections): the
+        // library's expectation, error and pulls per hypothesis. All NaN when
+        // BBDXGET has no measurement for the track.
+        auto hyp = makePid(dedxHypCol, i, kAlgoDedxHypotheses);
+        const auto& values = hypotheses[tracking.vecp_to_particle[i]];
+        for (std::size_t k = 0; k < kDedxHypCount; ++k)
+          hyp.addToParameters(values.empty() ? kNaN : values[k]);
 
         // RecDqdx parallel form (FCC-style consumers consume the typed
         // Quantity rather than ParticleID parameters[]). Type=1 marks
@@ -282,6 +354,7 @@ void ParticleIdWriter::emit()
 
   put(std::move(dedxCol), dedxAlgo(), "Dedx", Provenance::Derived);
   put(std::move(dqdxCol), dedxAlgo(), "DedxRecDqdx", Provenance::Derived);
+  put(std::move(dedxHypCol), dedxAlgo(), "DedxHypotheses", Provenance::Derived);
   put(std::move(muonCol), "MUID", "MuonID", Provenance::Transcribed);
   put(std::move(elecCol), "ELID", "ElectronID", Provenance::Transcribed);
   put(std::move(hadrCol), "HAID", "HadronID", Provenance::Transcribed);
